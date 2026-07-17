@@ -1,0 +1,37 @@
+# SlateDesk v2 — single-node deployment (architecture doc §5/§6, tier 1).
+#
+# The one variable you must provide is POSTGRES_PASSWORD (the install script
+# generates it into .env; manual path: `echo "POSTGRES_PASSWORD=$(openssl
+# rand -hex 24)" > .env`). DATABASE_URL is wired between the containers —
+# the app itself needs nothing else (architecture §5).
+services:
+  app:
+    build: .
+    image: slatedesk:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgres://slatedesk:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/slatedesk?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: slatedesk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: slatedesk
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slatedesk -d slatedesk"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  pgdata:

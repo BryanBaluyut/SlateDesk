@@ -1,0 +1,14 @@
+# Build artifacts
+/bin/
+frontend/dist/
+frontend/node_modules/
+
+# Embedded SPA build output — populated by `make build` from frontend/dist;
+# only the .gitkeep is tracked so go:embed has a file on fresh clones.
+internal/web/dist/*
+!internal/web/dist/.gitkeep
+
+# Local environment
+.env
+*.log
+.claude/

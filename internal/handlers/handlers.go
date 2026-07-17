@@ -1,0 +1,184 @@
+// Package handlers implements the generated api.ServerInterface: auth
+// (login/logout/me), users CRUD, and teams CRUD + membership. All errors are
+// RFC 9457 problem+json; authorization is enforced by the RequireUser /
+// RequireRole middleware wired in Router.
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+	openapi_types "github.com/oapi-codegen/runtime/types"
+
+	"github.com/BryanBaluyut/slatedesk/internal/api"
+	"github.com/BryanBaluyut/slatedesk/internal/auth"
+	"github.com/BryanBaluyut/slatedesk/internal/problem"
+	"github.com/BryanBaluyut/slatedesk/internal/store"
+)
+
+// Login rate limits. Per IP+email: loginBurst immediate attempts, then one
+// more every loginRefill — the anti-guessing brake for a single account.
+// Per IP: an aggregate cap across all emails, so one address cannot force
+// unbounded argon2id work (each verify pins 64 MiB) by enumerating fresh
+// email values; generous enough for an office NAT.
+const (
+	loginBurst  = 8
+	loginRefill = 30 * time.Second
+
+	loginIPBurst  = 30
+	loginIPRefill = time.Second
+)
+
+// Handlers implements api.ServerInterface.
+type Handlers struct {
+	pool         *pgxpool.Pool
+	q            *store.Queries
+	secret       []byte // instance secret; signs session cookies
+	limiter      *auth.RateLimiter // per IP+email
+	ipLimiter    *auth.RateLimiter // per IP, all emails combined
+	sessionTTL   time.Duration
+	cookieSecure auth.CookieSecureMode
+}
+
+var _ api.ServerInterface = (*Handlers)(nil)
+
+// New returns Handlers backed by pool, signing sessions with the instance
+// secret. cookieSecure controls the session cookie's Secure attribute.
+func New(pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode) *Handlers {
+	return &Handlers{
+		pool:         pool,
+		q:            store.New(pool),
+		secret:       secret,
+		limiter:      auth.NewRateLimiter(loginBurst, loginRefill),
+		ipLimiter:    auth.NewRateLimiter(loginIPBurst, loginIPRefill),
+		sessionTTL:   auth.DefaultSessionTTL,
+		cookieSecure: cookieSecure,
+	}
+}
+
+// Router returns the API router (mount it at /api/v1). Routing comes from
+// the generated spec-first wrapper; the auth policy middleware guards every
+// operation (deny-by-default: anything not explicitly public or
+// user-accessible requires admin).
+func (h *Handlers) Router() http.Handler {
+	r := chi.NewRouter()
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		problem.Write(w, r, http.StatusNotFound, "Not Found", "no such API route")
+	})
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		problem.Write(w, r, http.StatusMethodNotAllowed, "Method Not Allowed", "")
+	})
+	return api.HandlerWithOptions(h, api.ChiServerOptions{
+		BaseRouter:  r,
+		Middlewares: []api.MiddlewareFunc{h.authPolicy},
+		ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			// Path/query parameter binding failures from the generated
+			// wrapper (e.g. non-UUID id). The wrapper binds parameters
+			// before running the middlewares, so route the 400 through the
+			// same auth policy: protected routes must answer 401/403 to
+			// unauthenticated callers, not leak parameter formats.
+			h.authPolicy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				problem.Write(w, r, http.StatusBadRequest, "Bad Request", err.Error())
+			})).ServeHTTP(w, r)
+		},
+	})
+}
+
+// writeJSON writes a JSON response body with the given status.
+func writeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Error("write json response", "error", err, "path", r.URL.Path)
+	}
+}
+
+// decodeJSON decodes the request body into dst, rejecting unknown fields
+// and trailing garbage. On failure it writes a 400 problem and returns false.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		problem.Write(w, r, http.StatusBadRequest, "Bad Request", "invalid JSON body: "+err.Error())
+		return false
+	}
+	if dec.More() {
+		problem.Write(w, r, http.StatusBadRequest, "Bad Request", "invalid JSON body: trailing data")
+		return false
+	}
+	return true
+}
+
+// serverError logs err and writes a generic 500 problem (no internal detail
+// leaks to the client).
+func serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	slog.Error("handler error", "what", what, "error", err, "method", r.Method, "path", r.URL.Path)
+	problem.Write(w, r, http.StatusInternalServerError, "Internal Server Error", "")
+}
+
+// isUniqueViolation reports whether err is a Postgres unique constraint
+// violation (SQLSTATE 23505).
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// isNoRows reports whether err means the row was not found.
+func isNoRows(err error) bool {
+	return errors.Is(err, pgx.ErrNoRows)
+}
+
+// inTx runs fn inside a transaction with a store bound to it, committing on
+// nil and rolling back on error.
+func (h *Handlers) inTx(ctx context.Context, fn func(q *store.Queries) error) error {
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	if err := fn(h.q.WithTx(tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
+}
+
+// toAPIUser converts a store row to its API representation. Sensitive
+// columns (password_hash, oidc_*, token_version) never leave here.
+func toAPIUser(u store.User) api.User {
+	return api.User{
+		Id:        u.ID,
+		Email:     openapi_types.Email(u.Email),
+		Name:      u.Name,
+		Role:      api.Role(u.Role),
+		Company:   u.Company,
+		Active:    u.Active,
+		CreatedAt: u.CreatedAt,
+	}
+}
+
+// toAPIUsers converts a slice, mapping nil to an empty (JSON []) slice.
+func toAPIUsers(us []store.User) []api.User {
+	out := make([]api.User, 0, len(us))
+	for _, u := range us {
+		out = append(out, toAPIUser(u))
+	}
+	return out
+}
+
+// toAPITeam converts a store team row to its API representation.
+func toAPITeam(t store.Team) api.Team {
+	return api.Team{Id: t.ID, Name: t.Name, Description: t.Description}
+}

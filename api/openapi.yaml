@@ -1,0 +1,652 @@
+openapi: 3.1.0
+info:
+  title: SlateDesk API
+  description: |
+    SlateDesk v2 HTTP API. Milestone 1 surface: local authentication
+    (signed HttpOnly session cookie), users, and teams.
+
+    All errors are RFC 9457 problem details (`application/problem+json`).
+  version: 0.1.0
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: /api/v1
+    description: Same-origin API mount.
+
+security:
+  - cookieAuth: []
+
+tags:
+  - name: auth
+    description: Session lifecycle for browser clients.
+  - name: users
+    description: User management. Admin only, except reading yourself via /auth/me.
+  - name: teams
+    description: Teams (routing queues) and their membership.
+
+paths:
+  /auth/login:
+    post:
+      operationId: login
+      summary: Log in with email and password
+      description: |
+        Verifies the credentials and, on success, sets the `sd_session`
+        HttpOnly cookie (SameSite=Lax) carrying the signed session token.
+        The response body is empty; the cookie is the session.
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "204":
+          description: Authenticated. Session cookie set.
+          headers:
+            Set-Cookie:
+              description: "`sd_session` signed HttpOnly session cookie."
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Invalid credentials or deactivated account.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "429":
+          description: Too many login attempts; retry later.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Log out
+      description: |
+        Clears the session cookie. Always succeeds for authenticated and
+        unauthenticated callers alike; idempotent.
+      tags: [auth]
+      security: []
+      responses:
+        "204":
+          description: Session cookie cleared.
+          headers:
+            Set-Cookie:
+              description: Expired `sd_session` cookie.
+              schema:
+                type: string
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      summary: Get the authenticated user
+      tags: [auth]
+      responses:
+        "200":
+          description: The user the session cookie belongs to.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /users:
+    get:
+      operationId: listUsers
+      summary: List users
+      tags: [users]
+      parameters:
+        - name: role
+          in: query
+          description: Filter by role.
+          schema:
+            $ref: "#/components/schemas/Role"
+        - name: active
+          in: query
+          description: Filter by active flag.
+          schema:
+            type: boolean
+        - name: q
+          in: query
+          description: Case-insensitive substring match against email and name.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Page size.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          description: Page offset.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Matching users, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createUser
+      summary: Create a user
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: A user with this email already exists.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    get:
+      operationId: getUser
+      summary: Get a user
+      tags: [users]
+      responses:
+        "200":
+          description: The user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateUser
+      summary: Update a user
+      description: |
+        Partial update; omitted fields are left unchanged. Setting `password`
+        rehashes the password and bumps `token_version`, invalidating every
+        outstanding session for the user. Email is immutable in M1.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: The updated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deactivateUser
+      summary: Deactivate a user
+      description: |
+        Soft delete: sets `active=false` and bumps `token_version` so all
+        outstanding sessions die. The row is retained; there is no hard
+        delete in M1.
+      tags: [users]
+      responses:
+        "204":
+          description: User deactivated.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /teams:
+    get:
+      operationId: listTeams
+      summary: List teams
+      tags: [teams]
+      responses:
+        "200":
+          description: All teams, sorted by name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Team"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createTeam
+      summary: Create a team
+      tags: [teams]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTeamRequest"
+      responses:
+        "201":
+          description: Team created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: A team with this name already exists.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /teams/{id}:
+    parameters:
+      - $ref: "#/components/parameters/TeamID"
+    get:
+      operationId: getTeam
+      summary: Get a team with its members
+      tags: [teams]
+      responses:
+        "200":
+          description: The team, including member users.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamWithMembers"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateTeam
+      summary: Update a team
+      description: Partial update; omitted fields are left unchanged.
+      tags: [teams]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTeamRequest"
+      responses:
+        "200":
+          description: The updated team.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A team with this name already exists.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteTeam
+      summary: Delete a team
+      description: Hard delete. Membership rows cascade; users are untouched.
+      tags: [teams]
+      responses:
+        "204":
+          description: Team deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /teams/{id}/members:
+    put:
+      operationId: setTeamMembers
+      summary: Replace team membership
+      description: |
+        Replaces the full membership list with `user_ids` (idempotent PUT).
+        Unknown user ids fail the whole request with 400; nothing is applied
+        partially.
+      tags: [teams]
+      parameters:
+        - $ref: "#/components/parameters/TeamID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetTeamMembersRequest"
+      responses:
+        "200":
+          description: The team with its new membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamWithMembers"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sd_session
+      description: |
+        Signed HttpOnly session cookie (SameSite=Lax) carrying the user id
+        and token_version. Obtained via POST /auth/login; cleared via
+        POST /auth/logout.
+
+  parameters:
+    UserID:
+      name: id
+      in: path
+      required: true
+      description: User id.
+      schema:
+        type: string
+        format: uuid
+    TeamID:
+      name: id
+      in: path
+      required: true
+      description: Team id.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Malformed request body or parameters.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Unauthorized:
+      description: Missing, invalid, or expired session.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Forbidden:
+      description: Authenticated but not allowed to perform this action.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: No such resource.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    Problem:
+      description: Any other error, as RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+  schemas:
+    Role:
+      type: string
+      description: User role.
+      enum: [customer, agent, admin]
+
+    User:
+      type: object
+      description: |
+        A SlateDesk user. Sensitive columns (password_hash, oidc_subject,
+        token_version) are never serialized.
+      required: [id, email, name, role, company, active, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        company:
+          type: string
+          description: Free-form company label ('' when unset).
+        active:
+          type: boolean
+          description: Deactivated users cannot log in; false means soft-deleted.
+        created_at:
+          type: string
+          format: date-time
+
+    Team:
+      type: object
+      description: A team (routing queue).
+      required: [id, name, description]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+
+    TeamWithMembers:
+      description: A team including its member users.
+      allOf:
+        - $ref: "#/components/schemas/Team"
+        - type: object
+          required: [members]
+          properties:
+            members:
+              type: array
+              items:
+                $ref: "#/components/schemas/User"
+
+    Problem:
+      type: object
+      description: RFC 9457 problem details. Media type application/problem+json.
+      required: [title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: Problem type URI; "about:blank" when unspecified.
+          default: "about:blank"
+        title:
+          type: string
+          description: Short human-readable summary of the problem type.
+        status:
+          type: integer
+          description: HTTP status code.
+          minimum: 100
+          maximum: 599
+        detail:
+          type: string
+          description: Occurrence-specific explanation.
+        instance:
+          type: string
+          format: uri-reference
+          description: URI reference identifying this occurrence (request path).
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+
+    CreateUserRequest:
+      type: object
+      required: [email, name, role]
+      properties:
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        password:
+          type: string
+          minLength: 10
+          description: |
+            Optional initial password (minimum 10 characters). Omit for users
+            who will authenticate via OIDC (M5) or never log in.
+        company:
+          type: string
+          description: Defaults to '' when omitted.
+
+    UpdateUserRequest:
+      type: object
+      description: Partial update; omitted fields are left unchanged.
+      properties:
+        name:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        company:
+          type: string
+        active:
+          type: boolean
+        password:
+          type: string
+          minLength: 10
+          description: |
+            New password (minimum 10 characters); bumps token_version
+            (logout everywhere).
+
+    CreateTeamRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+          description: Defaults to '' when omitted.
+
+    UpdateTeamRequest:
+      type: object
+      description: Partial update; omitted fields are left unchanged.
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+
+    SetTeamMembersRequest:
+      type: object
+      required: [user_ids]
+      properties:
+        user_ids:
+          type: array
+          description: Complete replacement membership list. May be empty.
+          items:
+            type: string
+            format: uuid

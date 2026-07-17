@@ -1,0 +1,12 @@
+# oapi-codegen configuration. Regenerate with: tools/codegen.sh
+# Generates types + the chi ServerInterface + the embedded spec into
+# internal/api/gen.go. Strict-server mode is deliberately off (M1 decision):
+# handlers implement ServerInterface directly.
+package: api
+output: internal/api/gen.go
+generate:
+  models: true
+  chi-server: true
+  embedded-spec: true
+output-options:
+  skip-prune: false

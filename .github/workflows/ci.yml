@@ -1,0 +1,96 @@
+# SlateDesk v2 CI.
+#
+# Actions are pinned to commit SHAs (tag comments alongside); bump
+# deliberately. Four jobs, all required: backend (vet/build/test against a
+# real Postgres 17), frontend (typecheck + build), codegen-drift (the
+# spec-first contract check, architecture doc §1), docker (multi-stage image
+# builds end-to-end; never pushed from CI).
+
+name: CI
+
+on:
+  push:
+    branches: [main, v2]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (vet, build, test)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: slatedesk
+          POSTGRES_PASSWORD: slatedesk_ci
+          POSTGRES_DB: slatedesk_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U slatedesk -d slatedesk_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://slatedesk:slatedesk_ci@127.0.0.1:5432/slatedesk_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true # Go module + build cache
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+
+  frontend:
+    name: Frontend (typecheck, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  codegen-drift:
+    name: Codegen drift (spec-first contract)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # Regenerates from api/openapi.yaml and fails on any diff or untracked
+      # generated file.
+      - run: tools/check-codegen.sh
+
+  docker:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # Build only — proves the multi-stage build (SPA -> static binary ->
+      # distroless) end-to-end. Publishing is a release concern, not CI.
+      - run: docker build -t slatedesk:ci .
