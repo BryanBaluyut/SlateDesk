@@ -14,8 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BryanBaluyut/slatedesk/internal/auth"
+	"github.com/BryanBaluyut/slatedesk/internal/events"
 	"github.com/BryanBaluyut/slatedesk/internal/handlers"
 	"github.com/BryanBaluyut/slatedesk/internal/problem"
+	"github.com/BryanBaluyut/slatedesk/internal/storage"
 	"github.com/BryanBaluyut/slatedesk/internal/web"
 )
 
@@ -27,8 +29,10 @@ type Server struct {
 
 // New builds the router and returns a Server listening on addr when Run is
 // called. secret is the instance root secret (session cookie signing);
-// cookieSecure controls the session cookie's Secure attribute.
-func New(addr string, pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode) *Server {
+// cookieSecure controls the session cookie's Secure attribute; hub feeds
+// the SSE endpoint (run an events.Listener into it); blobs stores
+// attachment bytes.
+func New(addr string, pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode, hub *events.Hub, blobs storage.Storage) *Server {
 	s := &Server{pool: pool}
 
 	r := chi.NewRouter()
@@ -54,7 +58,7 @@ func New(addr string, pool *pgxpool.Pool, secret []byte, cookieSecure auth.Cooki
 		api.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 			problem.Write(w, r, http.StatusMethodNotAllowed, "Method Not Allowed", "")
 		})
-		api.Mount("/v1", handlers.New(pool, secret, cookieSecure).Router())
+		api.Mount("/v1", handlers.New(pool, secret, cookieSecure, hub, blobs).Router())
 	})
 
 	// Everything else: embedded SPA with client-side-routing fallback.

@@ -3,10 +3,21 @@ info:
   title: SlateDesk API
   description: |
     SlateDesk v2 HTTP API. Milestone 1 surface: local authentication
-    (signed HttpOnly session cookie), users, and teams.
+    (signed HttpOnly session cookie), users, and teams. Milestone 2 adds
+    the ticket core: tickets, articles, attachments, tags, dashboard
+    counters, and the realtime event stream.
 
     All errors are RFC 9457 problem details (`application/problem+json`).
-  version: 0.1.0
+
+    Access model (M2): every ticket-core operation requires an
+    authenticated **agent or admin** session — customer access arrives
+    with the M4 portal. The one stricter rule: `DELETE /tags/{id}` is
+    **admin only**. Agents can additionally **read** users and teams
+    (`GET /users`, `/users/{id}`, `/teams`, `/teams/{id}`) — the
+    workspace needs them for assignee pickers, team routing, and
+    requester lookups; all user/team mutations remain admin only. Each
+    operation's description states its required role.
+  version: 0.2.0
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -22,9 +33,25 @@ tags:
   - name: auth
     description: Session lifecycle for browser clients.
   - name: users
-    description: User management. Admin only, except reading yourself via /auth/me.
+    description: |
+      User management. Reads are agent or admin (the workspace's assignee
+      picker and requester lookups); mutations are admin only.
   - name: teams
-    description: Teams (routing queues) and their membership.
+    description: |
+      Teams (routing queues) and their membership. Reads are agent or
+      admin; mutations are admin only.
+  - name: tickets
+    description: Ticket core — lifecycle, fixed views, search, tag assignment.
+  - name: articles
+    description: Ticket thread messages (public replies and internal notes).
+  - name: attachments
+    description: Article-keyed file attachments (upload and download).
+  - name: tags
+    description: Tag management. Names are case-insensitively unique.
+  - name: dashboard
+    description: Workspace counters.
+  - name: events
+    description: Realtime Server-Sent Events stream.
 
 paths:
   /auth/login:
@@ -423,6 +450,542 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /tickets:
+    get:
+      operationId: listTickets
+      summary: List tickets
+      description: |
+        Filtered, paginated ticket list, most recent activity first
+        (`updated_at` descending), or by relevance when `q` is present.
+        Requires agent or admin role.
+
+        `view` applies one of the fixed workspace views; every other
+        filter composes with it (logical AND):
+
+          - `my` — assigned to the caller, not closed
+          - `unassigned` — no assignee, not closed
+          - `open` — status is open, waiting_on_customer, or on_hold
+          - `closed` — status is closed
+      tags: [tickets]
+      parameters:
+        - name: view
+          in: query
+          description: Fixed workspace view applied before the other filters.
+          schema:
+            $ref: "#/components/schemas/TicketView"
+        - name: status
+          in: query
+          description: Statuses to include (repeat the parameter). Empty = all.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/TicketStatus"
+        - name: priority
+          in: query
+          description: Priorities to include (repeat the parameter). Empty = all.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/TicketPriority"
+        - name: assignee_id
+          in: query
+          description: Only tickets assigned to this user.
+          schema:
+            type: string
+            format: uuid
+        - name: team_id
+          in: query
+          description: Only tickets owned by this team.
+          schema:
+            type: string
+            format: uuid
+        - name: tag_id
+          in: query
+          description: Only tickets bearing this tag.
+          schema:
+            type: string
+            format: uuid
+        - name: closed_today
+          in: query
+          description: |
+            When true, only tickets closed since midnight (database
+            timezone) — the same predicate as the dashboard's
+            `closed_today` counter, so that tile can deep-link a queue
+            whose contents match its number.
+          schema:
+            type: boolean
+        - name: q
+          in: query
+          description: |
+            Full-text search (websearch syntax, e.g. `printer -toner` or
+            `"exact phrase"`) across ticket subjects and article bodies.
+            When present, results are ranked by relevance.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Page size.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          description: Page offset.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: One page of matching tickets plus the total match count.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createTicket
+      summary: Create a ticket
+      description: |
+        Creates a ticket and its first article in one transaction: the
+        day's ticket number (YYYYMMDD-NNNN) is allocated atomically, the
+        body is recorded as an agent-authored public article
+        (`sender_type=agent`, `channel=web`), and a `created` audit event
+        plus a `ticket.created` stream event are emitted. The ticket
+        starts `open`; priority defaults to `medium`. Requires agent or
+        admin role.
+      tags: [tickets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTicketRequest"
+      responses:
+        "201":
+          description: Ticket created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /tickets/{id}:
+    parameters:
+      - $ref: "#/components/parameters/TicketID"
+    get:
+      operationId: getTicket
+      summary: Get a ticket with its full thread
+      description: |
+        The ticket plus requester/assignee summaries, tags, every article
+        in chronological order (each carrying its attachments), and the
+        audit event trail. Requires agent or admin role.
+      tags: [tickets]
+      responses:
+        "200":
+          description: The ticket detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateTicket
+      summary: Update ticket fields
+      description: |
+        Partial update of status, priority, assignee, and team. Omitted
+        fields are left unchanged; an explicit `null` for `assignee_id`
+        or `team_id` clears that field. Setting `status=open` on a closed
+        ticket is the reopen path. Every change is audited and emits a
+        `ticket.updated` stream event. Requires agent or admin role.
+      tags: [tickets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTicketRequest"
+      responses:
+        "200":
+          description: The updated ticket.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /tickets/{id}/tags:
+    put:
+      operationId: setTicketTags
+      summary: Replace a ticket's tags
+      description: |
+        Replaces the full tag set with `tag_ids` (idempotent PUT). Unknown
+        tag ids fail the whole request with 400; nothing is applied
+        partially. Emits a `tags_changed` audit event and a
+        `ticket.updated` stream event. Requires agent or admin role.
+      tags: [tickets]
+      parameters:
+        - $ref: "#/components/parameters/TicketID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetTicketTagsRequest"
+      responses:
+        "200":
+          description: The ticket's new tag set, sorted by name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /tickets/{id}/articles:
+    post:
+      operationId: createTicketArticle
+      summary: Add an article to a ticket
+      description: |
+        Appends an agent-authored article (`sender_type=agent`,
+        `channel=web`) — a public reply or, with `is_internal=true`, an
+        internal note. `body_html`, when provided, is sanitized
+        server-side (bluemonday) before storage. A public reply on an
+        open ticket flips it to `waiting_on_customer`; internal notes
+        never change status. Emits an `article_added` audit event and an
+        `article.created` stream event. Requires agent or admin role.
+      tags: [articles]
+      parameters:
+        - $ref: "#/components/parameters/TicketID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateArticleRequest"
+      responses:
+        "201":
+          description: Article created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /articles/{id}/attachments:
+    post:
+      operationId: uploadArticleAttachment
+      summary: Upload an attachment to an article
+      description: |
+        Multipart upload of one file (part name `file`), streamed to blob
+        storage — the whole request body is capped at 25 MiB. The stored
+        filename is the part's filename, sanitized; the content type is
+        taken from the part header (falling back to
+        `application/octet-stream`). Requires agent or admin role.
+      tags: [attachments]
+      parameters:
+        - $ref: "#/components/parameters/ArticleID"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The file to attach (max 25 MiB).
+      responses:
+        "201":
+          description: Attachment stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Attachment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/ContentTooLarge"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /attachments/{id}:
+    get:
+      operationId: downloadAttachment
+      summary: Download an attachment
+      description: |
+        Streams the attachment bytes. The response `Content-Type` is the
+        attachment's stored content type (`application/octet-stream`
+        below is the declared fallback), and `Content-Disposition` is
+        always `attachment` with a sanitized filename — attachments are
+        downloads, never inline renders. Requires agent or admin role.
+      tags: [attachments]
+      parameters:
+        - $ref: "#/components/parameters/AttachmentID"
+      responses:
+        "200":
+          description: The attachment body.
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="<sanitized>"`.'
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /tags:
+    get:
+      operationId: listTags
+      summary: List tags
+      description: All tags, sorted by name. Requires agent or admin role.
+      tags: [tags]
+      responses:
+        "200":
+          description: All tags.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tag"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createTag
+      summary: Create a tag
+      description: |
+        Tag names are case-insensitively unique. Requires agent or admin
+        role.
+      tags: [tags]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTagRequest"
+      responses:
+        "201":
+          description: Tag created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: A tag with this name already exists.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /tags/{id}:
+    parameters:
+      - $ref: "#/components/parameters/TagID"
+    patch:
+      operationId: updateTag
+      summary: Update a tag
+      description: |
+        Partial update; omitted fields are left unchanged; explicit
+        `color: null` clears the color. Requires agent or admin role.
+      tags: [tags]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTagRequest"
+      responses:
+        "200":
+          description: The updated tag.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A tag with this name already exists.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteTag
+      summary: Delete a tag
+      description: |
+        Hard delete; the tag disappears from every ticket (ticket_tags
+        rows cascade). **Admin only.**
+      tags: [tags]
+      responses:
+        "204":
+          description: Tag deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /dashboard/counters:
+    get:
+      operationId: getDashboardCounters
+      summary: Get the dashboard counters
+      description: |
+        The four workspace counters in one call. `closed_today` counts
+        tickets closed since midnight in the database's timezone (UTC in
+        deployment). Requires agent or admin role.
+      tags: [dashboard]
+      responses:
+        "200":
+          description: Current counter values.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardCounters"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /events:
+    get:
+      operationId: streamEvents
+      summary: Realtime event stream (SSE)
+      description: |
+        Server-Sent Events stream of ticket activity, intended for
+        workspace cache invalidation. Each event is one `data:` frame
+        whose payload is a JSON `StreamEvent` (`{type, ticket_id}`); no
+        SSE `event:` or `id:` fields are used. Event types:
+        `ticket.created`, `ticket.updated`, `article.created`, plus
+        `resync` (no `ticket_id`) when the server may have dropped events
+        (e.g. it re-established its own database LISTEN connection) — on
+        `resync` a client must refetch everything it displays.
+
+        Events are invalidation hints, not a durable feed: a client that
+        connects (or reconnects) must refetch whatever it displays. A
+        comment heartbeat (`: ping`) is written every ~25 seconds to keep
+        intermediaries from closing idle connections. Requires agent or
+        admin role.
+      tags: [events]
+      responses:
+        "200":
+          description: |
+            The event stream (`text/event-stream`). The declared schema
+            describes the JSON payload of each `data:` frame, not the raw
+            stream body.
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/StreamEvent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: |
+            Too many concurrent event streams on this server; retry
+            later (the UI degrades gracefully — events only accelerate
+            refetches).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -451,6 +1014,38 @@ components:
       schema:
         type: string
         format: uuid
+    TicketID:
+      name: id
+      in: path
+      required: true
+      description: Ticket id.
+      schema:
+        type: string
+        format: uuid
+    ArticleID:
+      name: id
+      in: path
+      required: true
+      description: Article id.
+      schema:
+        type: string
+        format: uuid
+    AttachmentID:
+      name: id
+      in: path
+      required: true
+      description: Attachment id.
+      schema:
+        type: string
+        format: uuid
+    TagID:
+      name: id
+      in: path
+      required: true
+      description: Tag id.
+      schema:
+        type: string
+        format: uuid
 
   responses:
     BadRequest:
@@ -473,6 +1068,12 @@ components:
             $ref: "#/components/schemas/Problem"
     NotFound:
       description: No such resource.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    ContentTooLarge:
+      description: "Request body exceeds the size limit (attachments: 25 MiB)."
       content:
         application/problem+json:
           schema:
@@ -650,3 +1251,395 @@ components:
           items:
             type: string
             format: uuid
+
+    TicketStatus:
+      type: string
+      description: Ticket lifecycle status.
+      enum: [open, waiting_on_customer, on_hold, closed]
+
+    TicketPriority:
+      type: string
+      description: Ticket priority.
+      enum: [low, medium, high, critical]
+
+    TicketView:
+      type: string
+      description: |
+        Fixed workspace views: `my` (assigned to the caller, not closed),
+        `unassigned` (no assignee, not closed), `open` (any non-closed
+        status), `closed` (closed only).
+      enum: [my, unassigned, open, closed]
+
+    ArticleSenderType:
+      type: string
+      description: Who authored an article.
+      enum: [customer, agent, system]
+
+    ArticleChannel:
+      type: string
+      description: The channel an article arrived through.
+      enum: [email, api, web]
+
+    UserSummary:
+      type: object
+      description: Compact user reference embedded in tickets and articles.
+      required: [id, name, email]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+
+    Ticket:
+      type: object
+      description: A ticket, as returned by list and update operations.
+      required:
+        - id
+        - number
+        - subject
+        - status
+        - priority
+        - requester
+        - assignee
+        - team_id
+        - created_at
+        - updated_at
+        - closed_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          description: Human-facing ticket number (YYYYMMDD-NNNN).
+          pattern: "^[0-9]{8}-[0-9]{4,}$"
+        subject:
+          type: string
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        priority:
+          $ref: "#/components/schemas/TicketPriority"
+        requester:
+          $ref: "#/components/schemas/UserSummary"
+        assignee:
+          description: Assigned agent; null when unassigned.
+          anyOf:
+            - $ref: "#/components/schemas/UserSummary"
+            - type: "null"
+        team_id:
+          type: ["string", "null"]
+          format: uuid
+          description: Owning team; null when not routed to a team.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Set while the ticket is closed; null otherwise.
+
+    TicketList:
+      type: object
+      description: One page of tickets plus the pre-pagination match count.
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Ticket"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total matching tickets before limit/offset.
+
+    TicketDetail:
+      description: |
+        A ticket with its full thread: tags, every article in
+        chronological order (each carrying its attachments), and the
+        audit event trail.
+      allOf:
+        - $ref: "#/components/schemas/Ticket"
+        - type: object
+          required: [tags, articles, events]
+          properties:
+            tags:
+              type: array
+              description: The ticket's tags, sorted by name.
+              items:
+                $ref: "#/components/schemas/Tag"
+            articles:
+              type: array
+              description: All articles, oldest first.
+              items:
+                $ref: "#/components/schemas/Article"
+            events:
+              type: array
+              description: Audit trail, oldest first.
+              items:
+                $ref: "#/components/schemas/TicketEvent"
+
+    Article:
+      type: object
+      description: |
+        One message in a ticket's thread. `body_html`, when present, was
+        sanitized (bluemonday) at write time and is safe to render;
+        `body_text` always exists and feeds search.
+      required:
+        - id
+        - ticket_id
+        - author
+        - sender_type
+        - channel
+        - is_internal
+        - body_text
+        - body_html
+        - attachments
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        ticket_id:
+          type: string
+          format: uuid
+        author:
+          description: Authoring user; null for external or system authors.
+          anyOf:
+            - $ref: "#/components/schemas/UserSummary"
+            - type: "null"
+        sender_type:
+          $ref: "#/components/schemas/ArticleSenderType"
+        channel:
+          $ref: "#/components/schemas/ArticleChannel"
+        is_internal:
+          type: boolean
+          description: Internal notes are never shown to customers.
+        body_text:
+          type: string
+        body_html:
+          type: ["string", "null"]
+          description: Sanitized HTML body; null when the article is plain text.
+        attachments:
+          type: array
+          description: Files attached to this article.
+          items:
+            $ref: "#/components/schemas/Attachment"
+        created_at:
+          type: string
+          format: date-time
+
+    Attachment:
+      type: object
+      description: |
+        Attachment metadata; the bytes live at GET /attachments/{id}.
+      required: [id, article_id, filename, content_type, size_bytes, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        article_id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+          description: Sanitized original filename.
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+
+    TicketEvent:
+      type: object
+      description: |
+        Slim audit event. `payload` is a small type-specific JSON
+        document (e.g. `{"from": "open", "to": "closed"}` for
+        status_changed).
+      required: [id, ticket_id, actor_id, type, payload, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Insertion-ordered id (stable even within one transaction).
+        ticket_id:
+          type: string
+          format: uuid
+        actor_id:
+          type: ["string", "null"]
+          format: uuid
+          description: Acting user; null for system actions.
+        type:
+          type: string
+          description: |
+            Event type. One of: created, article_added, status_changed,
+            priority_changed, assignee_changed, team_changed, tags_changed.
+        payload:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    Tag:
+      type: object
+      description: A tag. Names are case-insensitively unique.
+      required: [id, name, color]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        color:
+          type: ["string", "null"]
+          description: Display color hint (e.g. "#RRGGBB"); null when unset.
+
+    DashboardCounters:
+      type: object
+      description: The four workspace dashboard counters.
+      required: [open, unassigned, waiting_on_customer, closed_today]
+      properties:
+        open:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Tickets with status open.
+        unassigned:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Non-closed tickets with no assignee.
+        waiting_on_customer:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Tickets with status waiting_on_customer.
+        closed_today:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Tickets closed since midnight (database timezone).
+
+    StreamEvent:
+      type: object
+      description: |
+        JSON payload of one SSE `data:` frame on GET /events. A
+        cache-invalidation hint, not a durable feed. `ticket_id` is
+        present on the ticket-scoped types and absent on `resync`
+        (which means: events may have been dropped, refetch everything).
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [ticket.created, ticket.updated, article.created, resync]
+        ticket_id:
+          type: string
+          format: uuid
+
+    CreateTicketRequest:
+      type: object
+      required: [subject, body]
+      properties:
+        subject:
+          type: string
+          minLength: 1
+        body:
+          type: string
+          minLength: 1
+          description: |
+            Plain-text body of the ticket's first article (recorded as an
+            agent-authored public web article).
+        priority:
+          $ref: "#/components/schemas/TicketPriority"
+        team_id:
+          type: string
+          format: uuid
+          description: Route the ticket to this team.
+        requester_id:
+          type: string
+          format: uuid
+          description: |
+            The user the ticket is for (e.g. opening a ticket on a
+            customer's behalf). Defaults to the caller when omitted.
+
+    UpdateTicketRequest:
+      type: object
+      description: |
+        Partial update; omitted fields are left unchanged. `assignee_id`
+        and `team_id` are tri-state: omitted = unchanged, a uuid = set,
+        explicit null = cleared.
+      properties:
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        priority:
+          $ref: "#/components/schemas/TicketPriority"
+        assignee_id:
+          type: ["string", "null"]
+          format: uuid
+        team_id:
+          type: ["string", "null"]
+          format: uuid
+
+    SetTicketTagsRequest:
+      type: object
+      required: [tag_ids]
+      properties:
+        tag_ids:
+          type: array
+          description: Complete replacement tag set. May be empty.
+          items:
+            type: string
+            format: uuid
+
+    CreateArticleRequest:
+      type: object
+      required: [body_text, is_internal]
+      properties:
+        body_text:
+          type: string
+          minLength: 1
+        body_html:
+          type: string
+          description: |
+            Optional HTML rendering of the body; sanitized server-side
+            (bluemonday UGC policy) before storage.
+        is_internal:
+          type: boolean
+          description: |
+            true = internal note (never customer-visible, never changes
+            status); false = public reply.
+
+    CreateTagRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        color:
+          type: string
+          description: Display color hint (e.g. "#RRGGBB").
+
+    UpdateTagRequest:
+      type: object
+      description: |
+        Partial update; omitted fields are left unchanged; explicit
+        `color: null` clears the color.
+      properties:
+        name:
+          type: string
+          minLength: 1
+        color:
+          type: ["string", "null"]

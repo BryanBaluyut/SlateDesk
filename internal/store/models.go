@@ -13,6 +13,180 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ArticleChannel string
+
+const (
+	ArticleChannelEmail ArticleChannel = "email"
+	ArticleChannelApi   ArticleChannel = "api"
+	ArticleChannelWeb   ArticleChannel = "web"
+)
+
+func (e *ArticleChannel) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ArticleChannel(s)
+	case string:
+		*e = ArticleChannel(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ArticleChannel: %T", src)
+	}
+	return nil
+}
+
+type NullArticleChannel struct {
+	ArticleChannel ArticleChannel `json:"article_channel"`
+	Valid          bool           `json:"valid"` // Valid is true if ArticleChannel is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullArticleChannel) Scan(value interface{}) error {
+	if value == nil {
+		ns.ArticleChannel, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ArticleChannel.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullArticleChannel) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ArticleChannel), nil
+}
+
+type ArticleSender string
+
+const (
+	ArticleSenderCustomer ArticleSender = "customer"
+	ArticleSenderAgent    ArticleSender = "agent"
+	ArticleSenderSystem   ArticleSender = "system"
+)
+
+func (e *ArticleSender) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ArticleSender(s)
+	case string:
+		*e = ArticleSender(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ArticleSender: %T", src)
+	}
+	return nil
+}
+
+type NullArticleSender struct {
+	ArticleSender ArticleSender `json:"article_sender"`
+	Valid         bool          `json:"valid"` // Valid is true if ArticleSender is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullArticleSender) Scan(value interface{}) error {
+	if value == nil {
+		ns.ArticleSender, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ArticleSender.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullArticleSender) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ArticleSender), nil
+}
+
+type TicketPriority string
+
+const (
+	TicketPriorityLow      TicketPriority = "low"
+	TicketPriorityMedium   TicketPriority = "medium"
+	TicketPriorityHigh     TicketPriority = "high"
+	TicketPriorityCritical TicketPriority = "critical"
+)
+
+func (e *TicketPriority) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TicketPriority(s)
+	case string:
+		*e = TicketPriority(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TicketPriority: %T", src)
+	}
+	return nil
+}
+
+type NullTicketPriority struct {
+	TicketPriority TicketPriority `json:"ticket_priority"`
+	Valid          bool           `json:"valid"` // Valid is true if TicketPriority is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTicketPriority) Scan(value interface{}) error {
+	if value == nil {
+		ns.TicketPriority, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TicketPriority.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTicketPriority) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TicketPriority), nil
+}
+
+type TicketStatus string
+
+const (
+	TicketStatusOpen              TicketStatus = "open"
+	TicketStatusWaitingOnCustomer TicketStatus = "waiting_on_customer"
+	TicketStatusOnHold            TicketStatus = "on_hold"
+	TicketStatusClosed            TicketStatus = "closed"
+)
+
+func (e *TicketStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TicketStatus(s)
+	case string:
+		*e = TicketStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TicketStatus: %T", src)
+	}
+	return nil
+}
+
+type NullTicketStatus struct {
+	TicketStatus TicketStatus `json:"ticket_status"`
+	Valid        bool         `json:"valid"` // Valid is true if TicketStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTicketStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.TicketStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TicketStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTicketStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TicketStatus), nil
+}
+
 type UserRole string
 
 const (
@@ -56,9 +230,42 @@ func (ns NullUserRole) Value() (driver.Value, error) {
 	return string(ns.UserRole), nil
 }
 
+type Article struct {
+	ID               uuid.UUID      `json:"id"`
+	TicketID         uuid.UUID      `json:"ticket_id"`
+	AuthorID         pgtype.UUID    `json:"author_id"`
+	SenderType       ArticleSender  `json:"sender_type"`
+	Channel          ArticleChannel `json:"channel"`
+	IsInternal       bool           `json:"is_internal"`
+	BodyText         string         `json:"body_text"`
+	BodyHtml         pgtype.Text    `json:"body_html"`
+	MessageID        pgtype.Text    `json:"message_id"`
+	InReplyTo        pgtype.Text    `json:"in_reply_to"`
+	ReferencesHeader pgtype.Text    `json:"references_header"`
+	DeliveryStatus   pgtype.Text    `json:"delivery_status"`
+	CreatedAt        time.Time      `json:"created_at"`
+	SearchTsv        string         `json:"search_tsv"`
+}
+
+type ArticleAttachment struct {
+	ID          uuid.UUID `json:"id"`
+	ArticleID   uuid.UUID `json:"article_id"`
+	Filename    string    `json:"filename"`
+	ContentType string    `json:"content_type"`
+	SizeBytes   int64     `json:"size_bytes"`
+	StorageKey  string    `json:"storage_key"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type Setting struct {
 	Key   string `json:"key"`
 	Value []byte `json:"value"`
+}
+
+type Tag struct {
+	ID    uuid.UUID   `json:"id"`
+	Name  string      `json:"name"`
+	Color pgtype.Text `json:"color"`
 }
 
 type Team struct {
@@ -70,6 +277,40 @@ type Team struct {
 type TeamMember struct {
 	TeamID uuid.UUID `json:"team_id"`
 	UserID uuid.UUID `json:"user_id"`
+}
+
+type Ticket struct {
+	ID          uuid.UUID          `json:"id"`
+	Number      string             `json:"number"`
+	Subject     string             `json:"subject"`
+	Status      TicketStatus       `json:"status"`
+	Priority    TicketPriority     `json:"priority"`
+	RequesterID uuid.UUID          `json:"requester_id"`
+	AssigneeID  pgtype.UUID        `json:"assignee_id"`
+	TeamID      pgtype.UUID        `json:"team_id"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+	ClosedAt    pgtype.Timestamptz `json:"closed_at"`
+	SearchTsv   string             `json:"search_tsv"`
+}
+
+type TicketEvent struct {
+	ID        int64       `json:"id"`
+	TicketID  uuid.UUID   `json:"ticket_id"`
+	ActorID   pgtype.UUID `json:"actor_id"`
+	Type      string      `json:"type"`
+	Payload   []byte      `json:"payload"`
+	CreatedAt time.Time   `json:"created_at"`
+}
+
+type TicketNumberCounter struct {
+	Day     time.Time `json:"day"`
+	Counter int32     `json:"counter"`
+}
+
+type TicketTag struct {
+	TicketID uuid.UUID `json:"ticket_id"`
+	TagID    uuid.UUID `json:"tag_id"`
 }
 
 type User struct {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BryanBaluyut/slatedesk/internal/auth"
+	"github.com/BryanBaluyut/slatedesk/internal/db"
 	"github.com/BryanBaluyut/slatedesk/internal/migrate"
 )
 
@@ -25,6 +27,11 @@ const defaultDatabaseURL = "postgres://slatedesk:slatedesk_dev@127.0.0.1:5432/sl
 
 var (
 	testPool *pgxpool.Pool
+
+	// testDatabaseURL points at the throwaway test database; the SSE
+	// listener (events.NewListener) needs a URL of its own because LISTEN
+	// requires a dedicated connection.
+	testDatabaseURL string
 
 	// seedPasswordHash is one argon2id hash shared by all seeded users
 	// (hashing is deliberately slow; once is enough for tests).
@@ -71,12 +78,25 @@ func run(m *testing.M) int {
 		_ = admin.Close(dropCtx)
 	}()
 
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		log.Printf("handlers test: parse DATABASE_URL: %v", err)
+		return 1
+	}
+	parsed.Path = "/" + testDBName
+	testDatabaseURL = parsed.String()
+
 	poolCfg, err := pgxpool.ParseConfig(baseURL)
 	if err != nil {
 		log.Printf("handlers test: parse DATABASE_URL: %v", err)
 		return 1
 	}
 	poolCfg.ConnConfig.Database = testDBName
+	// Mirror production pool setup (tsvector codec registration).
+	poolCfg.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
+		db.RegisterTypes(conn)
+		return nil
+	}
 	testPool, err = pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		log.Printf("handlers test: connect to test database: %v", err)

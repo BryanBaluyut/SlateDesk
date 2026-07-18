@@ -182,6 +182,285 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tickets
+         * @description Filtered, paginated ticket list, most recent activity first
+         *     (`updated_at` descending), or by relevance when `q` is present.
+         *     Requires agent or admin role.
+         *
+         *     `view` applies one of the fixed workspace views; every other
+         *     filter composes with it (logical AND):
+         *
+         *       - `my` — assigned to the caller, not closed
+         *       - `unassigned` — no assignee, not closed
+         *       - `open` — status is open, waiting_on_customer, or on_hold
+         *       - `closed` — status is closed
+         */
+        get: operations["listTickets"];
+        put?: never;
+        /**
+         * Create a ticket
+         * @description Creates a ticket and its first article in one transaction: the
+         *     day's ticket number (YYYYMMDD-NNNN) is allocated atomically, the
+         *     body is recorded as an agent-authored public article
+         *     (`sender_type=agent`, `channel=web`), and a `created` audit event
+         *     plus a `ticket.created` stream event are emitted. The ticket
+         *     starts `open`; priority defaults to `medium`. Requires agent or
+         *     admin role.
+         */
+        post: operations["createTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tickets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Ticket id. */
+                id: components["parameters"]["TicketID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a ticket with its full thread
+         * @description The ticket plus requester/assignee summaries, tags, every article
+         *     in chronological order (each carrying its attachments), and the
+         *     audit event trail. Requires agent or admin role.
+         */
+        get: operations["getTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update ticket fields
+         * @description Partial update of status, priority, assignee, and team. Omitted
+         *     fields are left unchanged; an explicit `null` for `assignee_id`
+         *     or `team_id` clears that field. Setting `status=open` on a closed
+         *     ticket is the reopen path. Every change is audited and emits a
+         *     `ticket.updated` stream event. Requires agent or admin role.
+         */
+        patch: operations["updateTicket"];
+        trace?: never;
+    };
+    "/tickets/{id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a ticket's tags
+         * @description Replaces the full tag set with `tag_ids` (idempotent PUT). Unknown
+         *     tag ids fail the whole request with 400; nothing is applied
+         *     partially. Emits a `tags_changed` audit event and a
+         *     `ticket.updated` stream event. Requires agent or admin role.
+         */
+        put: operations["setTicketTags"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tickets/{id}/articles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add an article to a ticket
+         * @description Appends an agent-authored article (`sender_type=agent`,
+         *     `channel=web`) — a public reply or, with `is_internal=true`, an
+         *     internal note. `body_html`, when provided, is sanitized
+         *     server-side (bluemonday) before storage. A public reply on an
+         *     open ticket flips it to `waiting_on_customer`; internal notes
+         *     never change status. Emits an `article_added` audit event and an
+         *     `article.created` stream event. Requires agent or admin role.
+         */
+        post: operations["createTicketArticle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/articles/{id}/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload an attachment to an article
+         * @description Multipart upload of one file (part name `file`), streamed to blob
+         *     storage — the whole request body is capped at 25 MiB. The stored
+         *     filename is the part's filename, sanitized; the content type is
+         *     taken from the part header (falling back to
+         *     `application/octet-stream`). Requires agent or admin role.
+         */
+        post: operations["uploadArticleAttachment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/attachments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download an attachment
+         * @description Streams the attachment bytes. The response `Content-Type` is the
+         *     attachment's stored content type (`application/octet-stream`
+         *     below is the declared fallback), and `Content-Disposition` is
+         *     always `attachment` with a sanitized filename — attachments are
+         *     downloads, never inline renders. Requires agent or admin role.
+         */
+        get: operations["downloadAttachment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tags
+         * @description All tags, sorted by name. Requires agent or admin role.
+         */
+        get: operations["listTags"];
+        put?: never;
+        /**
+         * Create a tag
+         * @description Tag names are case-insensitively unique. Requires agent or admin
+         *     role.
+         */
+        post: operations["createTag"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tags/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tag id. */
+                id: components["parameters"]["TagID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a tag
+         * @description Hard delete; the tag disappears from every ticket (ticket_tags
+         *     rows cascade). **Admin only.**
+         */
+        delete: operations["deleteTag"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a tag
+         * @description Partial update; omitted fields are left unchanged; explicit
+         *     `color: null` clears the color. Requires agent or admin role.
+         */
+        patch: operations["updateTag"];
+        trace?: never;
+    };
+    "/dashboard/counters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the dashboard counters
+         * @description The four workspace counters in one call. `closed_today` counts
+         *     tickets closed since midnight in the database's timezone (UTC in
+         *     deployment). Requires agent or admin role.
+         */
+        get: operations["getDashboardCounters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Realtime event stream (SSE)
+         * @description Server-Sent Events stream of ticket activity, intended for
+         *     workspace cache invalidation. Each event is one `data:` frame
+         *     whose payload is a JSON `StreamEvent` (`{type, ticket_id}`); no
+         *     SSE `event:` or `id:` fields are used. Event types:
+         *     `ticket.created`, `ticket.updated`, `article.created`, plus
+         *     `resync` (no `ticket_id`) when the server may have dropped events
+         *     (e.g. it re-established its own database LISTEN connection) — on
+         *     `resync` a client must refetch everything it displays.
+         *
+         *     Events are invalidation hints, not a durable feed: a client that
+         *     connects (or reconnects) must refetch whatever it displays. A
+         *     comment heartbeat (`: ping`) is written every ~25 seconds to keep
+         *     intermediaries from closing idle connections. Requires agent or
+         *     admin role.
+         */
+        get: operations["streamEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -284,6 +563,263 @@ export interface components {
             /** @description Complete replacement membership list. May be empty. */
             user_ids: string[];
         };
+        /**
+         * @description Ticket lifecycle status.
+         * @enum {string}
+         */
+        TicketStatus: "open" | "waiting_on_customer" | "on_hold" | "closed";
+        /**
+         * @description Ticket priority.
+         * @enum {string}
+         */
+        TicketPriority: "low" | "medium" | "high" | "critical";
+        /**
+         * @description Fixed workspace views: `my` (assigned to the caller, not closed),
+         *     `unassigned` (no assignee, not closed), `open` (any non-closed
+         *     status), `closed` (closed only).
+         * @enum {string}
+         */
+        TicketView: "my" | "unassigned" | "open" | "closed";
+        /**
+         * @description Who authored an article.
+         * @enum {string}
+         */
+        ArticleSenderType: "customer" | "agent" | "system";
+        /**
+         * @description The channel an article arrived through.
+         * @enum {string}
+         */
+        ArticleChannel: "email" | "api" | "web";
+        /** @description Compact user reference embedded in tickets and articles. */
+        UserSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: email */
+            email: string;
+        };
+        /** @description A ticket, as returned by list and update operations. */
+        Ticket: {
+            /** Format: uuid */
+            id: string;
+            /** @description Human-facing ticket number (YYYYMMDD-NNNN). */
+            number: string;
+            subject: string;
+            status: components["schemas"]["TicketStatus"];
+            priority: components["schemas"]["TicketPriority"];
+            requester: components["schemas"]["UserSummary"];
+            /** @description Assigned agent; null when unassigned. */
+            assignee: components["schemas"]["UserSummary"] | null;
+            /**
+             * Format: uuid
+             * @description Owning team; null when not routed to a team.
+             */
+            team_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /**
+             * Format: date-time
+             * @description Set while the ticket is closed; null otherwise.
+             */
+            closed_at: string | null;
+        };
+        /** @description One page of tickets plus the pre-pagination match count. */
+        TicketList: {
+            items: components["schemas"]["Ticket"][];
+            /**
+             * Format: int64
+             * @description Total matching tickets before limit/offset.
+             */
+            total: number;
+        };
+        /**
+         * @description A ticket with its full thread: tags, every article in
+         *     chronological order (each carrying its attachments), and the
+         *     audit event trail.
+         */
+        TicketDetail: components["schemas"]["Ticket"] & {
+            /** @description The ticket's tags, sorted by name. */
+            tags: components["schemas"]["Tag"][];
+            /** @description All articles, oldest first. */
+            articles: components["schemas"]["Article"][];
+            /** @description Audit trail, oldest first. */
+            events: components["schemas"]["TicketEvent"][];
+        };
+        /**
+         * @description One message in a ticket's thread. `body_html`, when present, was
+         *     sanitized (bluemonday) at write time and is safe to render;
+         *     `body_text` always exists and feeds search.
+         */
+        Article: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            ticket_id: string;
+            /** @description Authoring user; null for external or system authors. */
+            author: components["schemas"]["UserSummary"] | null;
+            sender_type: components["schemas"]["ArticleSenderType"];
+            channel: components["schemas"]["ArticleChannel"];
+            /** @description Internal notes are never shown to customers. */
+            is_internal: boolean;
+            body_text: string;
+            /** @description Sanitized HTML body; null when the article is plain text. */
+            body_html: string | null;
+            /** @description Files attached to this article. */
+            attachments: components["schemas"]["Attachment"][];
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description Attachment metadata; the bytes live at GET /attachments/{id}. */
+        Attachment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            article_id: string;
+            /** @description Sanitized original filename. */
+            filename: string;
+            content_type: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /**
+         * @description Slim audit event. `payload` is a small type-specific JSON
+         *     document (e.g. `{"from": "open", "to": "closed"}` for
+         *     status_changed).
+         */
+        TicketEvent: {
+            /**
+             * Format: int64
+             * @description Insertion-ordered id (stable even within one transaction).
+             */
+            id: number;
+            /** Format: uuid */
+            ticket_id: string;
+            /**
+             * Format: uuid
+             * @description Acting user; null for system actions.
+             */
+            actor_id: string | null;
+            /**
+             * @description Event type. One of: created, article_added, status_changed,
+             *     priority_changed, assignee_changed, team_changed, tags_changed.
+             */
+            type: string;
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description A tag. Names are case-insensitively unique. */
+        Tag: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description Display color hint (e.g. "#RRGGBB"); null when unset. */
+            color: string | null;
+        };
+        /** @description The four workspace dashboard counters. */
+        DashboardCounters: {
+            /**
+             * Format: int64
+             * @description Tickets with status open.
+             */
+            open: number;
+            /**
+             * Format: int64
+             * @description Non-closed tickets with no assignee.
+             */
+            unassigned: number;
+            /**
+             * Format: int64
+             * @description Tickets with status waiting_on_customer.
+             */
+            waiting_on_customer: number;
+            /**
+             * Format: int64
+             * @description Tickets closed since midnight (database timezone).
+             */
+            closed_today: number;
+        };
+        /**
+         * @description JSON payload of one SSE `data:` frame on GET /events. A
+         *     cache-invalidation hint, not a durable feed. `ticket_id` is
+         *     present on the ticket-scoped types and absent on `resync`
+         *     (which means: events may have been dropped, refetch everything).
+         */
+        StreamEvent: {
+            /** @enum {string} */
+            type: "ticket.created" | "ticket.updated" | "article.created" | "resync";
+            /** Format: uuid */
+            ticket_id?: string;
+        };
+        CreateTicketRequest: {
+            subject: string;
+            /**
+             * @description Plain-text body of the ticket's first article (recorded as an
+             *     agent-authored public web article).
+             */
+            body: string;
+            priority?: components["schemas"]["TicketPriority"];
+            /**
+             * Format: uuid
+             * @description Route the ticket to this team.
+             */
+            team_id?: string;
+            /**
+             * Format: uuid
+             * @description The user the ticket is for (e.g. opening a ticket on a
+             *     customer's behalf). Defaults to the caller when omitted.
+             */
+            requester_id?: string;
+        };
+        /**
+         * @description Partial update; omitted fields are left unchanged. `assignee_id`
+         *     and `team_id` are tri-state: omitted = unchanged, a uuid = set,
+         *     explicit null = cleared.
+         */
+        UpdateTicketRequest: {
+            status?: components["schemas"]["TicketStatus"];
+            priority?: components["schemas"]["TicketPriority"];
+            /** Format: uuid */
+            assignee_id?: string | null;
+            /** Format: uuid */
+            team_id?: string | null;
+        };
+        SetTicketTagsRequest: {
+            /** @description Complete replacement tag set. May be empty. */
+            tag_ids: string[];
+        };
+        CreateArticleRequest: {
+            body_text: string;
+            /**
+             * @description Optional HTML rendering of the body; sanitized server-side
+             *     (bluemonday UGC policy) before storage.
+             */
+            body_html?: string;
+            /**
+             * @description true = internal note (never customer-visible, never changes
+             *     status); false = public reply.
+             */
+            is_internal: boolean;
+        };
+        CreateTagRequest: {
+            name: string;
+            /** @description Display color hint (e.g. "#RRGGBB"). */
+            color?: string;
+        };
+        /**
+         * @description Partial update; omitted fields are left unchanged; explicit
+         *     `color: null` clears the color.
+         */
+        UpdateTagRequest: {
+            name?: string;
+            color?: string | null;
+        };
     };
     responses: {
         /** @description Malformed request body or parameters. */
@@ -322,6 +858,15 @@ export interface components {
                 "application/problem+json": components["schemas"]["Problem"];
             };
         };
+        /** @description Request body exceeds the size limit (attachments: 25 MiB). */
+        ContentTooLarge: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/problem+json": components["schemas"]["Problem"];
+            };
+        };
         /** @description Any other error, as RFC 9457 problem details. */
         Problem: {
             headers: {
@@ -337,6 +882,14 @@ export interface components {
         UserID: string;
         /** @description Team id. */
         TeamID: string;
+        /** @description Ticket id. */
+        TicketID: string;
+        /** @description Article id. */
+        ArticleID: string;
+        /** @description Attachment id. */
+        AttachmentID: string;
+        /** @description Tag id. */
+        TagID: string;
     };
     requestBodies: never;
     headers: never;
@@ -769,6 +1322,468 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listTickets: {
+        parameters: {
+            query?: {
+                /** @description Fixed workspace view applied before the other filters. */
+                view?: components["schemas"]["TicketView"];
+                /** @description Statuses to include (repeat the parameter). Empty = all. */
+                status?: components["schemas"]["TicketStatus"][];
+                /** @description Priorities to include (repeat the parameter). Empty = all. */
+                priority?: components["schemas"]["TicketPriority"][];
+                /** @description Only tickets assigned to this user. */
+                assignee_id?: string;
+                /** @description Only tickets owned by this team. */
+                team_id?: string;
+                /** @description Only tickets bearing this tag. */
+                tag_id?: string;
+                /**
+                 * @description When true, only tickets closed since midnight (database
+                 *     timezone) — the same predicate as the dashboard's
+                 *     `closed_today` counter, so that tile can deep-link a queue
+                 *     whose contents match its number.
+                 */
+                closed_today?: boolean;
+                /**
+                 * @description Full-text search (websearch syntax, e.g. `printer -toner` or
+                 *     `"exact phrase"`) across ticket subjects and article bodies.
+                 *     When present, results are ranked by relevance.
+                 */
+                q?: string;
+                /** @description Page size. */
+                limit?: number;
+                /** @description Page offset. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of matching tickets plus the total match count. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    createTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description Ticket created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Ticket id. */
+                id: components["parameters"]["TicketID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ticket detail. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Ticket id. */
+                id: components["parameters"]["TicketID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated ticket. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    setTicketTags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Ticket id. */
+                id: components["parameters"]["TicketID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetTicketTagsRequest"];
+            };
+        };
+        responses: {
+            /** @description The ticket's new tag set, sorted by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tag"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    createTicketArticle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Ticket id. */
+                id: components["parameters"]["TicketID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateArticleRequest"];
+            };
+        };
+        responses: {
+            /** @description Article created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Article"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    uploadArticleAttachment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Article id. */
+                id: components["parameters"]["ArticleID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The file to attach (max 25 MiB).
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Attachment stored. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attachment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["ContentTooLarge"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    downloadAttachment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Attachment id. */
+                id: components["parameters"]["AttachmentID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The attachment body. */
+            200: {
+                headers: {
+                    /** @description `attachment; filename="<sanitized>"`. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listTags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All tags. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tag"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    createTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTagRequest"];
+            };
+        };
+        responses: {
+            /** @description Tag created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tag"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description A tag with this name already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tag id. */
+                id: components["parameters"]["TagID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tag deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Tag id. */
+                id: components["parameters"]["TagID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTagRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated tag. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Tag"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description A tag with this name already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getDashboardCounters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current counter values. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardCounters"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    streamEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /**
+             * @description The event stream (`text/event-stream`). The declared schema
+             *     describes the JSON payload of each `data:` frame, not the raw
+             *     stream body.
+             */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["StreamEvent"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /**
+             * @description Too many concurrent event streams on this server; retry
+             *     later (the UI degrades gracefully — events only accelerate
+             *     refetches).
+             */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
             default: components["responses"]["Problem"];
         };
     };

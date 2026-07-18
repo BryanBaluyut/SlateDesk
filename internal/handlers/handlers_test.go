@@ -19,8 +19,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/BryanBaluyut/slatedesk/internal/auth"
+	"github.com/BryanBaluyut/slatedesk/internal/events"
 	"github.com/BryanBaluyut/slatedesk/internal/handlers"
+	"github.com/BryanBaluyut/slatedesk/internal/storage"
 	"github.com/BryanBaluyut/slatedesk/internal/store"
+	"github.com/BryanBaluyut/slatedesk/internal/ticket"
 )
 
 var uniqueCounter atomic.Int64
@@ -34,11 +37,15 @@ func uniqueName(prefix string) string {
 }
 
 // env is one isolated handler stack: its own instance secret (so cookies
-// from other envs never verify) mounted at /api/v1 like production.
+// from other envs never verify), its own SSE hub fed by a dedicated
+// LISTEN connection, and its own temp-dir blob storage — mounted at
+// /api/v1 like production.
 type env struct {
 	t      *testing.T
 	srv    *httptest.Server
 	q      *store.Queries
+	svc    *ticket.Service
+	hub    *events.Hub
 	secret []byte
 }
 
@@ -48,13 +55,31 @@ func newEnv(t *testing.T) *env {
 	if _, err := rand.Read(secret); err != nil {
 		t.Fatalf("generate secret: %v", err)
 	}
+
+	hub := events.NewHub()
+	listenCtx, stopListener := context.WithCancel(context.Background())
+	t.Cleanup(stopListener)
+	go func() { _ = events.NewListener(testDatabaseURL, hub).Run(listenCtx) }()
+
+	blobs, err := storage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatalf("create blob storage: %v", err)
+	}
+
 	r := chi.NewRouter()
 	r.Route("/api", func(api chi.Router) {
-		api.Mount("/v1", handlers.New(testPool, secret, auth.CookieSecureAuto).Router())
+		api.Mount("/v1", handlers.New(testPool, secret, auth.CookieSecureAuto, hub, blobs).Router())
 	})
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
-	return &env{t: t, srv: srv, q: store.New(testPool), secret: secret}
+	return &env{
+		t:      t,
+		srv:    srv,
+		q:      store.New(testPool),
+		svc:    ticket.NewService(testPool),
+		hub:    hub,
+		secret: secret,
+	}
 }
 
 // seedUser inserts a user with the shared seed password directly via the
@@ -161,7 +186,9 @@ func (e *env) decode(res result, dest any) {
 
 // TestAuthMatrix exercises every key endpoint as anon, customer, agent, and
 // admin, asserting the exact status per principal and problem+json on
-// rejections. Deny-by-default: only /auth/* is reachable below admin.
+// rejections. Deny-by-default: below admin, only /auth/* plus agent READS
+// of users/teams (the workspace's assignee picker, team routing, and
+// requester lookups) are reachable; all mutations stay admin-only.
 func TestAuthMatrix(t *testing.T) {
 	e := newEnv(t)
 	adminU := e.seedUser(store.UserRoleAdmin)
@@ -196,24 +223,24 @@ func TestAuthMatrix(t *testing.T) {
 		{"get me", http.MethodGet, "/api/v1/auth/me", nil,
 			expect(401, 200, 200, 200)},
 		{"list users", http.MethodGet, "/api/v1/users", nil,
-			expect(401, 403, 403, 200)},
+			expect(401, 403, 200, 200)},
 		{"create user", http.MethodPost, "/api/v1/users",
 			map[string]any{"email": uniqueEmail(), "name": "Matrix Made", "role": "customer"},
 			expect(401, 403, 403, 201)},
 		{"get user", http.MethodGet, "/api/v1/users/" + victim.ID.String(), nil,
-			expect(401, 403, 403, 200)},
+			expect(401, 403, 200, 200)},
 		{"update user", http.MethodPatch, "/api/v1/users/" + patchTarget.ID.String(),
 			map[string]any{"name": "Renamed"},
 			expect(401, 403, 403, 200)},
 		{"deactivate user", http.MethodDelete, "/api/v1/users/" + victim.ID.String(), nil,
 			expect(401, 403, 403, 204)},
 		{"list teams", http.MethodGet, "/api/v1/teams", nil,
-			expect(401, 403, 403, 200)},
+			expect(401, 403, 200, 200)},
 		{"create team", http.MethodPost, "/api/v1/teams",
 			map[string]any{"name": uniqueName("matrix-team")},
 			expect(401, 403, 403, 201)},
 		{"get team", http.MethodGet, "/api/v1/teams/" + team.ID.String(), nil,
-			expect(401, 403, 403, 200)},
+			expect(401, 403, 200, 200)},
 		{"update team", http.MethodPatch, "/api/v1/teams/" + team.ID.String(),
 			map[string]any{"description": "matrix"},
 			expect(401, 403, 403, 200)},

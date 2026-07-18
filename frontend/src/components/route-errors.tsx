@@ -1,5 +1,5 @@
 import { Link, useRouter } from "@tanstack/react-router";
-import { Compass } from "lucide-react";
+import { Compass, Loader2 } from "lucide-react";
 
 import { ProblemAlert } from "@/components/problem-alert";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,26 @@ export function RouteErrorFallback({ error }: { error: Error }) {
           </Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Router-level pending fallback: entry navigations (cold load, a shared
+ * /tickets/{id} link) block on loaders (/auth/me, ticket detail); show a
+ * spinner instead of a blank viewport for the round-trip.
+ */
+export function RoutePending() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading"
+      className="grid min-h-svh place-items-center bg-background"
+    >
+      <Loader2
+        className="size-5 animate-spin text-muted-foreground"
+        aria-hidden="true"
+      />
     </div>
   );
 }

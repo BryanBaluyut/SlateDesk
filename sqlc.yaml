@@ -20,3 +20,11 @@ sql:
             go_type: "time.Time"
           - db_type: "timestamptz"
             go_type: "time.Time"
+          - db_type: "pg_catalog.date"
+            go_type: "time.Time"
+          - db_type: "date"
+            go_type: "time.Time"
+          # tsvector columns are generated server-side and only ever read
+          # (pgx returns unknown-OID values as text, which scans into string).
+          - db_type: "tsvector"
+            go_type: "string"

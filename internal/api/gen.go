@@ -21,25 +21,227 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for ArticleChannel.
+const (
+	Api   ArticleChannel = "api"
+	Email ArticleChannel = "email"
+	Web   ArticleChannel = "web"
+)
+
+// Valid indicates whether the value is a known member of the ArticleChannel enum.
+func (e ArticleChannel) Valid() bool {
+	switch e {
+	case Api:
+		return true
+	case Email:
+		return true
+	case Web:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ArticleSenderType.
+const (
+	ArticleSenderTypeAgent    ArticleSenderType = "agent"
+	ArticleSenderTypeCustomer ArticleSenderType = "customer"
+	ArticleSenderTypeSystem   ArticleSenderType = "system"
+)
+
+// Valid indicates whether the value is a known member of the ArticleSenderType enum.
+func (e ArticleSenderType) Valid() bool {
+	switch e {
+	case ArticleSenderTypeAgent:
+		return true
+	case ArticleSenderTypeCustomer:
+		return true
+	case ArticleSenderTypeSystem:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
-	Admin    Role = "admin"
-	Agent    Role = "agent"
-	Customer Role = "customer"
+	RoleAdmin    Role = "admin"
+	RoleAgent    Role = "agent"
+	RoleCustomer Role = "customer"
 )
 
 // Valid indicates whether the value is a known member of the Role enum.
 func (e Role) Valid() bool {
 	switch e {
-	case Admin:
+	case RoleAdmin:
 		return true
-	case Agent:
+	case RoleAgent:
 		return true
-	case Customer:
+	case RoleCustomer:
 		return true
 	default:
 		return false
 	}
+}
+
+// Defines values for StreamEventType.
+const (
+	ArticleCreated StreamEventType = "article.created"
+	Resync         StreamEventType = "resync"
+	TicketCreated  StreamEventType = "ticket.created"
+	TicketUpdated  StreamEventType = "ticket.updated"
+)
+
+// Valid indicates whether the value is a known member of the StreamEventType enum.
+func (e StreamEventType) Valid() bool {
+	switch e {
+	case ArticleCreated:
+		return true
+	case Resync:
+		return true
+	case TicketCreated:
+		return true
+	case TicketUpdated:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TicketPriority.
+const (
+	Critical TicketPriority = "critical"
+	High     TicketPriority = "high"
+	Low      TicketPriority = "low"
+	Medium   TicketPriority = "medium"
+)
+
+// Valid indicates whether the value is a known member of the TicketPriority enum.
+func (e TicketPriority) Valid() bool {
+	switch e {
+	case Critical:
+		return true
+	case High:
+		return true
+	case Low:
+		return true
+	case Medium:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TicketStatus.
+const (
+	TicketStatusClosed            TicketStatus = "closed"
+	TicketStatusOnHold            TicketStatus = "on_hold"
+	TicketStatusOpen              TicketStatus = "open"
+	TicketStatusWaitingOnCustomer TicketStatus = "waiting_on_customer"
+)
+
+// Valid indicates whether the value is a known member of the TicketStatus enum.
+func (e TicketStatus) Valid() bool {
+	switch e {
+	case TicketStatusClosed:
+		return true
+	case TicketStatusOnHold:
+		return true
+	case TicketStatusOpen:
+		return true
+	case TicketStatusWaitingOnCustomer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TicketView.
+const (
+	TicketViewClosed     TicketView = "closed"
+	TicketViewMy         TicketView = "my"
+	TicketViewOpen       TicketView = "open"
+	TicketViewUnassigned TicketView = "unassigned"
+)
+
+// Valid indicates whether the value is a known member of the TicketView enum.
+func (e TicketView) Valid() bool {
+	switch e {
+	case TicketViewClosed:
+		return true
+	case TicketViewMy:
+		return true
+	case TicketViewOpen:
+		return true
+	case TicketViewUnassigned:
+		return true
+	default:
+		return false
+	}
+}
+
+// Article One message in a ticket's thread. `body_html`, when present, was
+// sanitized (bluemonday) at write time and is safe to render;
+// `body_text` always exists and feeds search.
+type Article struct {
+	// Attachments Files attached to this article.
+	Attachments []Attachment `json:"attachments"`
+
+	// Author Authoring user; null for external or system authors.
+	Author *UserSummary `json:"author"`
+
+	// BodyHtml Sanitized HTML body; null when the article is plain text.
+	BodyHtml *string `json:"body_html"`
+	BodyText string  `json:"body_text"`
+
+	// Channel The channel an article arrived through.
+	Channel   ArticleChannel     `json:"channel"`
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+
+	// IsInternal Internal notes are never shown to customers.
+	IsInternal bool `json:"is_internal"`
+
+	// SenderType Who authored an article.
+	SenderType ArticleSenderType  `json:"sender_type"`
+	TicketId   openapi_types.UUID `json:"ticket_id"`
+}
+
+// ArticleChannel The channel an article arrived through.
+type ArticleChannel string
+
+// ArticleSenderType Who authored an article.
+type ArticleSenderType string
+
+// Attachment Attachment metadata; the bytes live at GET /attachments/{id}.
+type Attachment struct {
+	ArticleId   openapi_types.UUID `json:"article_id"`
+	ContentType string             `json:"content_type"`
+	CreatedAt   time.Time          `json:"created_at"`
+
+	// Filename Sanitized original filename.
+	Filename  string             `json:"filename"`
+	Id        openapi_types.UUID `json:"id"`
+	SizeBytes int64              `json:"size_bytes"`
+}
+
+// CreateArticleRequest defines model for CreateArticleRequest.
+type CreateArticleRequest struct {
+	// BodyHtml Optional HTML rendering of the body; sanitized server-side
+	// (bluemonday UGC policy) before storage.
+	BodyHtml *string `json:"body_html,omitempty"`
+	BodyText string  `json:"body_text"`
+
+	// IsInternal true = internal note (never customer-visible, never changes
+	// status); false = public reply.
+	IsInternal bool `json:"is_internal"`
+}
+
+// CreateTagRequest defines model for CreateTagRequest.
+type CreateTagRequest struct {
+	// Color Display color hint (e.g. "#RRGGBB").
+	Color *string `json:"color,omitempty"`
+	Name  string  `json:"name"`
 }
 
 // CreateTeamRequest defines model for CreateTeamRequest.
@@ -47,6 +249,24 @@ type CreateTeamRequest struct {
 	// Description Defaults to '' when omitted.
 	Description *string `json:"description,omitempty"`
 	Name        string  `json:"name"`
+}
+
+// CreateTicketRequest defines model for CreateTicketRequest.
+type CreateTicketRequest struct {
+	// Body Plain-text body of the ticket's first article (recorded as an
+	// agent-authored public web article).
+	Body string `json:"body"`
+
+	// Priority Ticket priority.
+	Priority *TicketPriority `json:"priority,omitempty"`
+
+	// RequesterId The user the ticket is for (e.g. opening a ticket on a
+	// customer's behalf). Defaults to the caller when omitted.
+	RequesterId *openapi_types.UUID `json:"requester_id,omitempty"`
+	Subject     string              `json:"subject"`
+
+	// TeamId Route the ticket to this team.
+	TeamId *openapi_types.UUID `json:"team_id,omitempty"`
 }
 
 // CreateUserRequest defines model for CreateUserRequest.
@@ -62,6 +282,21 @@ type CreateUserRequest struct {
 
 	// Role User role.
 	Role Role `json:"role"`
+}
+
+// DashboardCounters The four workspace dashboard counters.
+type DashboardCounters struct {
+	// ClosedToday Tickets closed since midnight (database timezone).
+	ClosedToday int64 `json:"closed_today"`
+
+	// Open Tickets with status open.
+	Open int64 `json:"open"`
+
+	// Unassigned Non-closed tickets with no assignee.
+	Unassigned int64 `json:"unassigned"`
+
+	// WaitingOnCustomer Tickets with status waiting_on_customer.
+	WaitingOnCustomer int64 `json:"waiting_on_customer"`
 }
 
 // LoginRequest defines model for LoginRequest.
@@ -97,6 +332,32 @@ type SetTeamMembersRequest struct {
 	UserIds []openapi_types.UUID `json:"user_ids"`
 }
 
+// SetTicketTagsRequest defines model for SetTicketTagsRequest.
+type SetTicketTagsRequest struct {
+	// TagIds Complete replacement tag set. May be empty.
+	TagIds []openapi_types.UUID `json:"tag_ids"`
+}
+
+// StreamEvent JSON payload of one SSE `data:` frame on GET /events. A
+// cache-invalidation hint, not a durable feed. `ticket_id` is
+// present on the ticket-scoped types and absent on `resync`
+// (which means: events may have been dropped, refetch everything).
+type StreamEvent struct {
+	TicketId *openapi_types.UUID `json:"ticket_id,omitempty"`
+	Type     StreamEventType     `json:"type"`
+}
+
+// StreamEventType defines model for StreamEvent.Type.
+type StreamEventType string
+
+// Tag A tag. Names are case-insensitively unique.
+type Tag struct {
+	// Color Display color hint (e.g. "#RRGGBB"); null when unset.
+	Color *string            `json:"color"`
+	Id    openapi_types.UUID `json:"id"`
+	Name  string             `json:"name"`
+}
+
 // Team A team (routing queue).
 type Team struct {
 	Description string             `json:"description"`
@@ -112,10 +373,135 @@ type TeamWithMembers struct {
 	Name        string             `json:"name"`
 }
 
+// Ticket A ticket, as returned by list and update operations.
+type Ticket struct {
+	// Assignee Assigned agent; null when unassigned.
+	Assignee *UserSummary `json:"assignee"`
+
+	// ClosedAt Set while the ticket is closed; null otherwise.
+	ClosedAt  *time.Time         `json:"closed_at"`
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+
+	// Number Human-facing ticket number (YYYYMMDD-NNNN).
+	Number string `json:"number"`
+
+	// Priority Ticket priority.
+	Priority TicketPriority `json:"priority"`
+
+	// Requester Compact user reference embedded in tickets and articles.
+	Requester UserSummary `json:"requester"`
+
+	// Status Ticket lifecycle status.
+	Status  TicketStatus `json:"status"`
+	Subject string       `json:"subject"`
+
+	// TeamId Owning team; null when not routed to a team.
+	TeamId    *openapi_types.UUID `json:"team_id"`
+	UpdatedAt time.Time           `json:"updated_at"`
+}
+
+// TicketDetail A ticket with its full thread: tags, every article in
+// chronological order (each carrying its attachments), and the
+// audit event trail.
+type TicketDetail struct {
+	// Articles All articles, oldest first.
+	Articles []Article `json:"articles"`
+
+	// Assignee Assigned agent; null when unassigned.
+	Assignee *UserSummary `json:"assignee"`
+
+	// ClosedAt Set while the ticket is closed; null otherwise.
+	ClosedAt  *time.Time `json:"closed_at"`
+	CreatedAt time.Time  `json:"created_at"`
+
+	// Events Audit trail, oldest first.
+	Events []TicketEvent      `json:"events"`
+	Id     openapi_types.UUID `json:"id"`
+
+	// Number Human-facing ticket number (YYYYMMDD-NNNN).
+	Number string `json:"number"`
+
+	// Priority Ticket priority.
+	Priority TicketPriority `json:"priority"`
+
+	// Requester Compact user reference embedded in tickets and articles.
+	Requester UserSummary `json:"requester"`
+
+	// Status Ticket lifecycle status.
+	Status  TicketStatus `json:"status"`
+	Subject string       `json:"subject"`
+
+	// Tags The ticket's tags, sorted by name.
+	Tags []Tag `json:"tags"`
+
+	// TeamId Owning team; null when not routed to a team.
+	TeamId    *openapi_types.UUID `json:"team_id"`
+	UpdatedAt time.Time           `json:"updated_at"`
+}
+
+// TicketEvent Slim audit event. `payload` is a small type-specific JSON
+// document (e.g. `{"from": "open", "to": "closed"}` for
+// status_changed).
+type TicketEvent struct {
+	// ActorId Acting user; null for system actions.
+	ActorId   *openapi_types.UUID `json:"actor_id"`
+	CreatedAt time.Time           `json:"created_at"`
+
+	// Id Insertion-ordered id (stable even within one transaction).
+	Id       int64                  `json:"id"`
+	Payload  map[string]interface{} `json:"payload"`
+	TicketId openapi_types.UUID     `json:"ticket_id"`
+
+	// Type Event type. One of: created, article_added, status_changed,
+	// priority_changed, assignee_changed, team_changed, tags_changed.
+	Type string `json:"type"`
+}
+
+// TicketList One page of tickets plus the pre-pagination match count.
+type TicketList struct {
+	Items []Ticket `json:"items"`
+
+	// Total Total matching tickets before limit/offset.
+	Total int64 `json:"total"`
+}
+
+// TicketPriority Ticket priority.
+type TicketPriority string
+
+// TicketStatus Ticket lifecycle status.
+type TicketStatus string
+
+// TicketView Fixed workspace views: `my` (assigned to the caller, not closed),
+// `unassigned` (no assignee, not closed), `open` (any non-closed
+// status), `closed` (closed only).
+type TicketView string
+
+// UpdateTagRequest Partial update; omitted fields are left unchanged; explicit
+// `color: null` clears the color.
+type UpdateTagRequest struct {
+	Color *string `json:"color,omitempty"`
+	Name  *string `json:"name,omitempty"`
+}
+
 // UpdateTeamRequest Partial update; omitted fields are left unchanged.
 type UpdateTeamRequest struct {
 	Description *string `json:"description,omitempty"`
 	Name        *string `json:"name,omitempty"`
+}
+
+// UpdateTicketRequest Partial update; omitted fields are left unchanged. `assignee_id`
+// and `team_id` are tri-state: omitted = unchanged, a uuid = set,
+// explicit null = cleared.
+type UpdateTicketRequest struct {
+	AssigneeId *openapi_types.UUID `json:"assignee_id,omitempty"`
+
+	// Priority Ticket priority.
+	Priority *TicketPriority `json:"priority,omitempty"`
+
+	// Status Ticket lifecycle status.
+	Status *TicketStatus       `json:"status,omitempty"`
+	TeamId *openapi_types.UUID `json:"team_id,omitempty"`
 }
 
 // UpdateUserRequest Partial update; omitted fields are left unchanged.
@@ -149,14 +535,36 @@ type User struct {
 	Role Role `json:"role"`
 }
 
+// UserSummary Compact user reference embedded in tickets and articles.
+type UserSummary struct {
+	Email openapi_types.Email `json:"email"`
+	Id    openapi_types.UUID  `json:"id"`
+	Name  string              `json:"name"`
+}
+
+// ArticleID defines model for ArticleID.
+type ArticleID = openapi_types.UUID
+
+// AttachmentID defines model for AttachmentID.
+type AttachmentID = openapi_types.UUID
+
+// TagID defines model for TagID.
+type TagID = openapi_types.UUID
+
 // TeamID defines model for TeamID.
 type TeamID = openapi_types.UUID
+
+// TicketID defines model for TicketID.
+type TicketID = openapi_types.UUID
 
 // UserID defines model for UserID.
 type UserID = openapi_types.UUID
 
 // BadRequest RFC 9457 problem details. Media type application/problem+json.
 type BadRequest = Problem
+
+// ContentTooLarge RFC 9457 problem details. Media type application/problem+json.
+type ContentTooLarge = Problem
 
 // Forbidden RFC 9457 problem details. Media type application/problem+json.
 type Forbidden = Problem
@@ -166,6 +574,50 @@ type NotFound = Problem
 
 // Unauthorized RFC 9457 problem details. Media type application/problem+json.
 type Unauthorized = Problem
+
+// UploadArticleAttachmentMultipartBody defines parameters for UploadArticleAttachment.
+type UploadArticleAttachmentMultipartBody struct {
+	// File The file to attach (max 25 MiB).
+	File openapi_types.File `json:"file"`
+}
+
+// ListTicketsParams defines parameters for ListTickets.
+type ListTicketsParams struct {
+	// View Fixed workspace view applied before the other filters.
+	View *TicketView `form:"view,omitempty" json:"view,omitempty"`
+
+	// Status Statuses to include (repeat the parameter). Empty = all.
+	Status *[]TicketStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Priority Priorities to include (repeat the parameter). Empty = all.
+	Priority *[]TicketPriority `form:"priority,omitempty" json:"priority,omitempty"`
+
+	// AssigneeId Only tickets assigned to this user.
+	AssigneeId *openapi_types.UUID `form:"assignee_id,omitempty" json:"assignee_id,omitempty"`
+
+	// TeamId Only tickets owned by this team.
+	TeamId *openapi_types.UUID `form:"team_id,omitempty" json:"team_id,omitempty"`
+
+	// TagId Only tickets bearing this tag.
+	TagId *openapi_types.UUID `form:"tag_id,omitempty" json:"tag_id,omitempty"`
+
+	// ClosedToday When true, only tickets closed since midnight (database
+	// timezone) — the same predicate as the dashboard's
+	// `closed_today` counter, so that tile can deep-link a queue
+	// whose contents match its number.
+	ClosedToday *bool `form:"closed_today,omitempty" json:"closed_today,omitempty"`
+
+	// Q Full-text search (websearch syntax, e.g. `printer -toner` or
+	// `"exact phrase"`) across ticket subjects and article bodies.
+	// When present, results are ranked by relevance.
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
+	// Limit Page size.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Offset Page offset.
+	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
+}
 
 // ListUsersParams defines parameters for ListUsers.
 type ListUsersParams struct {
@@ -185,8 +637,17 @@ type ListUsersParams struct {
 	Offset *int `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// UploadArticleAttachmentMultipartRequestBody defines body for UploadArticleAttachment for multipart/form-data ContentType.
+type UploadArticleAttachmentMultipartRequestBody UploadArticleAttachmentMultipartBody
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
+
+// CreateTagJSONRequestBody defines body for CreateTag for application/json ContentType.
+type CreateTagJSONRequestBody = CreateTagRequest
+
+// UpdateTagJSONRequestBody defines body for UpdateTag for application/json ContentType.
+type UpdateTagJSONRequestBody = UpdateTagRequest
 
 // CreateTeamJSONRequestBody defines body for CreateTeam for application/json ContentType.
 type CreateTeamJSONRequestBody = CreateTeamRequest
@@ -197,6 +658,18 @@ type UpdateTeamJSONRequestBody = UpdateTeamRequest
 // SetTeamMembersJSONRequestBody defines body for SetTeamMembers for application/json ContentType.
 type SetTeamMembersJSONRequestBody = SetTeamMembersRequest
 
+// CreateTicketJSONRequestBody defines body for CreateTicket for application/json ContentType.
+type CreateTicketJSONRequestBody = CreateTicketRequest
+
+// UpdateTicketJSONRequestBody defines body for UpdateTicket for application/json ContentType.
+type UpdateTicketJSONRequestBody = UpdateTicketRequest
+
+// CreateTicketArticleJSONRequestBody defines body for CreateTicketArticle for application/json ContentType.
+type CreateTicketArticleJSONRequestBody = CreateArticleRequest
+
+// SetTicketTagsJSONRequestBody defines body for SetTicketTags for application/json ContentType.
+type SetTicketTagsJSONRequestBody = SetTicketTagsRequest
+
 // CreateUserJSONRequestBody defines body for CreateUser for application/json ContentType.
 type CreateUserJSONRequestBody = CreateUserRequest
 
@@ -205,6 +678,12 @@ type UpdateUserJSONRequestBody = UpdateUserRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// UploadArticleAttachment Upload an attachment to an article
+	// (POST /articles/{id}/attachments)
+	UploadArticleAttachment(w http.ResponseWriter, r *http.Request, id ArticleID)
+	// DownloadAttachment Download an attachment
+	// (GET /attachments/{id})
+	DownloadAttachment(w http.ResponseWriter, r *http.Request, id AttachmentID)
 	// Login Log in with email and password
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -214,6 +693,24 @@ type ServerInterface interface {
 	// GetCurrentUser Get the authenticated user
 	// (GET /auth/me)
 	GetCurrentUser(w http.ResponseWriter, r *http.Request)
+	// GetDashboardCounters Get the dashboard counters
+	// (GET /dashboard/counters)
+	GetDashboardCounters(w http.ResponseWriter, r *http.Request)
+	// StreamEvents Realtime event stream (SSE)
+	// (GET /events)
+	StreamEvents(w http.ResponseWriter, r *http.Request)
+	// ListTags List tags
+	// (GET /tags)
+	ListTags(w http.ResponseWriter, r *http.Request)
+	// CreateTag Create a tag
+	// (POST /tags)
+	CreateTag(w http.ResponseWriter, r *http.Request)
+	// DeleteTag Delete a tag
+	// (DELETE /tags/{id})
+	DeleteTag(w http.ResponseWriter, r *http.Request, id TagID)
+	// UpdateTag Update a tag
+	// (PATCH /tags/{id})
+	UpdateTag(w http.ResponseWriter, r *http.Request, id TagID)
 	// ListTeams List teams
 	// (GET /teams)
 	ListTeams(w http.ResponseWriter, r *http.Request)
@@ -232,6 +729,24 @@ type ServerInterface interface {
 	// SetTeamMembers Replace team membership
 	// (PUT /teams/{id}/members)
 	SetTeamMembers(w http.ResponseWriter, r *http.Request, id TeamID)
+	// ListTickets List tickets
+	// (GET /tickets)
+	ListTickets(w http.ResponseWriter, r *http.Request, params ListTicketsParams)
+	// CreateTicket Create a ticket
+	// (POST /tickets)
+	CreateTicket(w http.ResponseWriter, r *http.Request)
+	// GetTicket Get a ticket with its full thread
+	// (GET /tickets/{id})
+	GetTicket(w http.ResponseWriter, r *http.Request, id TicketID)
+	// UpdateTicket Update ticket fields
+	// (PATCH /tickets/{id})
+	UpdateTicket(w http.ResponseWriter, r *http.Request, id TicketID)
+	// CreateTicketArticle Add an article to a ticket
+	// (POST /tickets/{id}/articles)
+	CreateTicketArticle(w http.ResponseWriter, r *http.Request, id TicketID)
+	// SetTicketTags Replace a ticket's tags
+	// (PUT /tickets/{id}/tags)
+	SetTicketTags(w http.ResponseWriter, r *http.Request, id TicketID)
 	// ListUsers List users
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams)
@@ -253,6 +768,18 @@ type ServerInterface interface {
 
 type Unimplemented struct{}
 
+// UploadArticleAttachment Upload an attachment to an article
+// (POST /articles/{id}/attachments)
+func (_ Unimplemented) UploadArticleAttachment(w http.ResponseWriter, r *http.Request, id ArticleID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DownloadAttachment Download an attachment
+// (GET /attachments/{id})
+func (_ Unimplemented) DownloadAttachment(w http.ResponseWriter, r *http.Request, id AttachmentID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // Login Log in with email and password
 // (POST /auth/login)
 func (_ Unimplemented) Login(w http.ResponseWriter, r *http.Request) {
@@ -268,6 +795,42 @@ func (_ Unimplemented) Logout(w http.ResponseWriter, r *http.Request) {
 // GetCurrentUser Get the authenticated user
 // (GET /auth/me)
 func (_ Unimplemented) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDashboardCounters Get the dashboard counters
+// (GET /dashboard/counters)
+func (_ Unimplemented) GetDashboardCounters(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StreamEvents Realtime event stream (SSE)
+// (GET /events)
+func (_ Unimplemented) StreamEvents(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListTags List tags
+// (GET /tags)
+func (_ Unimplemented) ListTags(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateTag Create a tag
+// (POST /tags)
+func (_ Unimplemented) CreateTag(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteTag Delete a tag
+// (DELETE /tags/{id})
+func (_ Unimplemented) DeleteTag(w http.ResponseWriter, r *http.Request, id TagID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateTag Update a tag
+// (PATCH /tags/{id})
+func (_ Unimplemented) UpdateTag(w http.ResponseWriter, r *http.Request, id TagID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -304,6 +867,42 @@ func (_ Unimplemented) UpdateTeam(w http.ResponseWriter, r *http.Request, id Tea
 // SetTeamMembers Replace team membership
 // (PUT /teams/{id}/members)
 func (_ Unimplemented) SetTeamMembers(w http.ResponseWriter, r *http.Request, id TeamID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListTickets List tickets
+// (GET /tickets)
+func (_ Unimplemented) ListTickets(w http.ResponseWriter, r *http.Request, params ListTicketsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateTicket Create a ticket
+// (POST /tickets)
+func (_ Unimplemented) CreateTicket(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetTicket Get a ticket with its full thread
+// (GET /tickets/{id})
+func (_ Unimplemented) GetTicket(w http.ResponseWriter, r *http.Request, id TicketID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateTicket Update ticket fields
+// (PATCH /tickets/{id})
+func (_ Unimplemented) UpdateTicket(w http.ResponseWriter, r *http.Request, id TicketID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateTicketArticle Add an article to a ticket
+// (POST /tickets/{id}/articles)
+func (_ Unimplemented) CreateTicketArticle(w http.ResponseWriter, r *http.Request, id TicketID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetTicketTags Replace a ticket's tags
+// (PUT /tickets/{id}/tags)
+func (_ Unimplemented) SetTicketTags(w http.ResponseWriter, r *http.Request, id TicketID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -346,6 +945,58 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// UploadArticleAttachment operation middleware
+func (siw *ServerInterfaceWrapper) UploadArticleAttachment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id ArticleID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UploadArticleAttachment(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DownloadAttachment operation middleware
+func (siw *ServerInterfaceWrapper) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AttachmentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DownloadAttachment(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
 
@@ -379,6 +1030,114 @@ func (siw *ServerInterfaceWrapper) GetCurrentUser(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetCurrentUser(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDashboardCounters operation middleware
+func (siw *ServerInterfaceWrapper) GetDashboardCounters(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDashboardCounters(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StreamEvents operation middleware
+func (siw *ServerInterfaceWrapper) StreamEvents(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StreamEvents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListTags operation middleware
+func (siw *ServerInterfaceWrapper) ListTags(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTags(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateTag operation middleware
+func (siw *ServerInterfaceWrapper) CreateTag(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateTag(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteTag operation middleware
+func (siw *ServerInterfaceWrapper) DeleteTag(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TagID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteTag(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateTag operation middleware
+func (siw *ServerInterfaceWrapper) UpdateTag(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TagID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateTag(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -511,6 +1270,274 @@ func (siw *ServerInterfaceWrapper) SetTeamMembers(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetTeamMembers(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListTickets operation middleware
+func (siw *ServerInterfaceWrapper) ListTickets(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTicketsParams
+
+	// ------------- Optional query parameter "view" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "view", r.URL.Query(), &params.View, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "view"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "view", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "priority" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "priority", r.URL.Query(), &params.Priority, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "priority"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "priority", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "assignee_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "assignee_id", r.URL.Query(), &params.AssigneeId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "assignee_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "assignee_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "team_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "team_id", r.URL.Query(), &params.TeamId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "team_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "team_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "tag_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tag_id", r.URL.Query(), &params.TagId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tag_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tag_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "closed_today" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "closed_today", r.URL.Query(), &params.ClosedToday, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "closed_today"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "closed_today", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTickets(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateTicket operation middleware
+func (siw *ServerInterfaceWrapper) CreateTicket(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateTicket(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetTicket operation middleware
+func (siw *ServerInterfaceWrapper) GetTicket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TicketID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTicket(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateTicket operation middleware
+func (siw *ServerInterfaceWrapper) UpdateTicket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TicketID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateTicket(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateTicketArticle operation middleware
+func (siw *ServerInterfaceWrapper) CreateTicketArticle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TicketID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateTicketArticle(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetTicketTags operation middleware
+func (siw *ServerInterfaceWrapper) SetTicketTags(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TicketID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetTicketTags(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -852,6 +1879,48 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/teams/{id}/members", wrapper.SetTeamMembers)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/tickets", wrapper.ListTickets)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/tickets", wrapper.CreateTicket)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/tickets/{id}", wrapper.GetTicket)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/tickets/{id}", wrapper.UpdateTicket)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/tickets/{id}/tags", wrapper.SetTicketTags)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/tickets/{id}/articles", wrapper.CreateTicketArticle)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/articles/{id}/attachments", wrapper.UploadArticleAttachment)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/attachments/{id}", wrapper.DownloadAttachment)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/tags", wrapper.ListTags)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/tags", wrapper.CreateTag)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/tags/{id}", wrapper.DeleteTag)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/tags/{id}", wrapper.UpdateTag)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/dashboard/counters", wrapper.GetDashboardCounters)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/events", wrapper.StreamEvents)
+	})
 
 	return r
 }
@@ -861,57 +1930,141 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"AAAA//8=",
+	"7H3rchs3l+CrnOJMlUlvi5L9ObsbqvxDsZ183rVslyVP6qu0Vw12H5IYdwMdAC2aX0pb+xD7hPskWzhA",
+	"30hQpK6TZPLLFrvRAA7O/YbfBqksSilQGD2Y/DYomWIFGlT014kyPM3x7Wv7R4Y6Vbw0XIrBpH4EPBsP",
+	"ogG3P5XMLAbRQLACB5MBzwbRQOGvFVeYDSZGVRgNdLrAgtmvzaQqmBlMBlVFb5pVaUdpo7iYD66uosGJ",
+	"MSxdFChMcP7m6QMu4ZzNQ3Ofs/lDToqsCM6KrHjIaXn6FYOgdk8ecOrPGlVoYvv7g017ZQfrUgqNhOs/",
+	"sOwT/lqhNvavVAqDgv7LyjLnKbNrOiyVnOZY/Jd/13aBv3Wm+1eFs8Fk8C+HLT0duqf68KMb5Sbtb/GU",
+	"5XahmIFyk8NUZiuQClpKHA+uosErt6BzKd8xNcfHXOOn7srwW4qYaTALBM3/iZDzghsYsoYe9QSefwen",
+	"/IcRLfxHqaY8y1A85pJPKrNAYez3MYNpZUBIAyzP5RIzMBJKVBbuYBZcA0vtMFrte2l+lJXIHnOx7yXo",
+	"Kl2AQi0rlSItpH7/MYEmViDNAhWgUlJFwDR8+vEVfP/iu/8GfjbI0DCeO5z8LFhlFlLxf+KjAuyUa83F",
+	"PAIuLlnOs8jSC34rLSMAjVq707yq2UFXlm1ymQ8CoUCt2RyBC2BgiN89sTiukGVjSCzmXyxMkScRLBco",
+	"oFSoUZgIlkzHQjPBjQUCDKd5hYUUGVuNgBlYKm4QDC8QmMiAa9BshhYBFYoM1XEs3McNfjMJsHzJVhrw",
+	"G9dG04gZEZtGptLFOBaDaFAqWaIy3HGtDtlt7uxHnqMG94pDe4fuDhLEVg0WetdJtKLWHrrno0wptrJ/",
+	"OxSgtYjVh9lg8sv1X7NM/awqCqbs8N/q74kqzwdXX0KELC3HhkqjOgb7GszouA0qwXJ79HqlDRbgVuJQ",
+	"szmxTaicNaf19/PTd8TV/HfpaC1jY7Vyo6HMGRdgj2fcCJFfaikSuWV/qSe0r9kJ12RNNEgXTAjMd0La",
+	"zfvKv20HKrQs7IKZnkzLmMEDi1abgi2ygnG3/IsGXF9w4YC4CaS3/onlmxaHFILAS1SgF3IpLCqllTay",
+	"IPHUfHwqZY5M2K9rwu8L92CvXZ/RiHM7wKIZEeHFXnu56uoBvzjFoB3foGh/Ue2h9EHRPcouHkU9Wuud",
+	"zJdmRXL675gSmawd5aZStUDwCwAmGoxjSvFLS6sLJav5wsIWRVXYbWHBOC2j5INosMRpZ972VDeBuTH1",
+	"zwvpaQWzztzduerDtdPNLeFHA0dk4TlbBnGdnl6gYRkz7JhobLqyiJXzS7SM8qc353DYAfDhbzy7CjI8",
+	"t9iLPZHci6QGDzdfuAWBzXiOTgndzluk4nNuCah+eXwHUrWK1gUBrPc6F+a/vhhEg4ILXtiDO2rGWnSe",
+	"owrTRgeGnc2sAas36050f0WPPfJ19Oj+4V3DlT/Qf1jumLKTjpbty5nDFuLSraDVqC5RHWieYSw6Uhc+",
+	"//QKSpnzdDWCKc6kQtBGKjZHh00bsO0x7oKLdyjmZjGYPLspy7QGCLwE3uWcMHRcs6ang0uu+TTHyHNT",
+	"ywHmaFUIw0ylR8cwY7m2nymrac5TUFjmq97KGx67drJdrtVd5/bTOmfzrSeVytwJ9f4eX3Nd5mwF9BgW",
+	"XBgY4ng+hnjwL58+/fTTDz/Eg1EQ02t6uRbCa1uiMdesH1mxdQO9dW9sA2esyo22cuzJEyf3ZcGNwezR",
+	"Fk/y6VpK2Vz3R6uMHNhD9maiI45GYZ1xpU0jS4YKU6kyy+StMhkLYuUHDev3KLbEaT1k5DBtBxWUikvF",
+	"zWqXXHdb/Fi/7eGD2qDy7HtTJFotr7Mnq4FZbc8hmSxRWJ5Qq+ggBbBY1MT1RMMUFyyfjcbQPWH7uZTl",
+	"Oar+SdNed/Peyp3cbu5gkBXBjX2SlbUC2l3VmrgdMd69iDXMqlfkeNc1OGZV7WsovCiZWN2dOJxe0pVL",
+	"taaylY42UYppvZQqu0YucMv6WQ71qzD0Yg+eHVk+qlhqUOnRGD4U3BDWWGTSsVguJCx5npPSU3sF4JIz",
+	"+PD29SsYnn43slaE48i5nAMXm3RwFNiOkvlO5faTfWf9BGsAeblL3wkd42umF1PJVPZKVqJ2ym4SzUxW",
+	"CpZSfdUlSxGyehSkfth4Q41Kc6kxuzAyY6ttHj8N7i3QXKQIBc8Eny8MDK0SN2XaGbb/lAJHPSTeRy2J",
+	"BpaYt8+85GYBTigS2d9igkowrflcYACr3ktx4DdnujMKCX4Q3mLGJeOGi/mFFBeNAr3XDgMDbzz9GooR",
+	"eHtACK8v6qNCCAvfyTkXW/nIDci/S+U3EaX1B5vxoVV2HGZr3HebCwtOMeMM7Jdgm79qk3Lc6ACjStNK",
+	"KRQpHugSUz7jKeC3MmeCOe9iSJ+0ep9IA4bE509vQeEM6YPAM8u2Zisr/EhwyGYyK+Wde7ZkZtEnxErx",
+	"g+YjQdlG6Lc5+9/Pzz/WuJnKjGihYN8c7n33/fcdTHx2FCQFw03I13a2kMrAoiqYOFDIMjbNEbTzBtXa",
+	"TH1M9qNBqJnGqiVBNZgM2FRWZjLNmfg6WPcgfex8Dj5/ensMcff9eOAkXCX8qTkpty8M1zDVbbsBbAhP",
+	"P8kQYCjUYeXADiucZQUXQSP8DI1ViE+xmKLSW8nVysQLngUO/ZUsyhwNks3BUvQ2O31uwUvIuTZjOGUr",
+	"mCJgUZpVz4O4U5HqOw7XANcsKwQyuzXimudsvn1nhs1vsDHD5qDx4TZUrya4H6OQFW8ugw6T/3H24T2U",
+	"bJVLllmSkALh7OwNJFbqThKYKVag1XzJZYL2I3oMJ7FIWbrAA+8SJ55DBlrkQh+QVYqobYaYjSFp/GMJ",
+	"cB0L79C232311AOdytKKyFWJzh3NpvVbiUK9EmkSi+FywdMFFMiEnoBbEBRsBQt2iTBFFJApWZaYRcTS",
+	"TLqwb6mVWXAxH4WcPDdx/rX8oCYbN3rsPRaNL3BclZn/ofZ4ta+43QQIa/1Y7dPQmZ6zecD5ZdFsDO9Z",
+	"4X2oKdP2iDQKzQ2/xHwFleC/VhjQ0O5ggXf92ZWwaH6t73pPOG/R3kMepsahZPcQBBeyIggvZAUMlays",
+	"ogK/Vlg55fJa4/62brWbb6g78bZt/czNwnNhcljm+R5REYLHVbTO04r2O3uFaqwY2cma6o9ubmAz/OIO",
+	"hIs0rzJ7ItzSNo131hUFWxxzDh4nPaFIokJTKYEZTFckSoifOJK0Gr4ijhWwVGp9/MEiTF4/BhKxfcqp",
+	"dWfapdeTWWCjZ2hgueA5rrku3BD/TQqtLrnuWxabjuYQhT5gGEhU9jQDOiApaTOWktLptuTeheE//vGP",
+	"f5yevn598P79+/eOPpkxqOy4//XL0cH3X37771cH7j8voqt/HTyMF2kfamgRoaPt7p7vzL3b9//s7/H5",
+	"sCRHlX3exSgriS1vc8FYtsP/E0IEL8NugAhBbubOPOq4kjxwOufSBXTUkmG76x5a9pbWJZYgmyQYv24s",
+	"qT15pGMzm1zSi/OA6neS57VvU0cg88waSuQl3T/67fMGAqFvp+sEZq0ybsAoxvNbTuq26jTEwMSGzbe4",
+	"gtrcBTbXEWipjGO5dQhqv+nZXgqublUp+18Pjv3EimMo5ASxMmVmacTlW0z82klHbEPxIhbpQkkhcznn",
+	"KQX+M8uLkKULSJlSq1o+dcKIo4jEjFlgLBidCi3SnY3VPBtk3KKNn+W8gM7IMSReN7d6MzDQBbMrX5Ud",
+	"s9+q8LHIZFqRqeH0s+S3eDBTsogHE4jJPRMPIogHRrpfHMXEg6sEZlLVEaELFyHKgmoyS40Mu9JPUhPI",
+	"majzJNJG1O7PeG4vgdYTC7TdgBQHdH6YAc9gqA3ZJhbEhBNckN1jFBPaLTfsYtx0PPjTIfBkGXfO448d",
+	"sLk8wQ2WdDuTo7+3Nw63ViWO4YNAkLMJeLhFNSJfsCyzf/aPN7IWmOO7zU+NJ7L9hThv+xebNx8IBjd3",
+	"5kXU+ONHttDbGe91RPOOaxNOqCrZHMmh472dZV5p793Bg5LNufOKQcGsOUh+6k3Vr+FVN+CZQXYpTShg",
+	"e25/ditodRxdR40pr/FQzmbefLpT1J3WXy9kOzw/dnSiYA5ujSRdL1Eul3Y1mPGqGESDBZ8v6Py4sWwy",
+	"6Cvq6Tjb5sr5DNOV5b0OV7tzeu9y2KEsxcVC5lmjBVyzhH/juAzlrX3DrBPQuOS41BNIilUCw1on70f2",
+	"nJfDzTeKYpG0ynsCw45bv/8iJHYn9qtiBaIJCjTx+AgS90sCQx8vkCJfeW5cQ6NYrXvaPXyu2f9n0pb6",
+	"Ifg1x6XlGCz3NtJxHYODGcc8c+6EHGcGKuF5wDH5m3nKTSwSMr0nxPsTSHNkytEf/R4SJo2/YbsM2DcM",
+	"voHdfrP9eP0dd3tzr8Bdl78esb/rBiBpODzPklhYTSXxynVCA4ziBxYTcdJ87mX7gQgYWAEFL0GjiWJR",
+	"H7+T+C/dsdeyIWxVXyvwQjhwe7PtduZXx8Tad5Hbj3AtIH7vGGhVlcuuS6mTENmJt99HXPw9LneGwo9h",
+	"WhWlBiO/ori4RKW5FLEY5nIuK+MU7OUCVSjv487x7s0j0CE3wwmc5czga9RfSV0dw1ntHLW8qiqEhmG9",
+	"0YsF04sIJM/SC2+6RrHobW/UzVVFxVnO/7mFBJrDWs9/oCdUOUA+LkiZsELDpQbUKVrk7wYtZ+Ygwxz7",
+	"2RHhc1+TcgrxgIoQ/CuQsynmMKyTLshzG86muo02foNA7d38p3dIjKB5QtkRLRyj+uB26qhd908wKMRS",
+	"4xKO2kgrFlO0Cjpw0SiEFPjwZu4mzT8aWK9xS7sZN2FAedhpZTnwmQV7LenlV44nlaXzDXvX6VZ/N6b8",
+	"IPJVXU0BbgwMz1iBZ9zgy3fs26g1u02dusUzJ8d6NDmGD1PDuP3wJWfw8cPZORyyyiwOrS0vjmtBZZ/G",
+	"ov9YVsYRL1WAuWW0NWA6u/ArbAHJSv4/ceXqRriYyZBRX3Ocy+dAse6Tj2/HcMpz1Mbanc9AV2rGUpxA",
+	"LlPWyxxyLFRfC6dR5DiH9z4gK3T388+BZZmORcdZnEqFkxrjoo7PquPMiLxjpMnviUWd4NO4OUAhy6ne",
+	"xDk6NIUax7GIxUmeu8IeJ8u2pUXAMNmWDJGM3IfSFLWGQmaWW50+H028r8ZHDe1eWpc+eKT1KYi9wqyn",
+	"T8npDlIBBbafPm0A+f/+z/9tsmaBuRldcryOBbmN7G5PX0AplWH5GM4XSD4DSy5W/IGqcpxA8vrNuzfn",
+	"b+DQwo6yyl3A8+lTmpHU+adPx3Ayp7hlygS0foN8BU+fKmTZ06deFDTnGYthQhFY+j2JIHH/c1PYP+m1",
+	"9n/uwYg2Rv6o1r4RdUVdQW6aWjeD0sLTHi4FYXxQjI46Fo1vFnIpv1alPgaW57RKmg+KyriQCijLHgS0",
+	"+x3DG5YuYtGc0RMNHQohew81+dJqjuNyE4gQc56i0MShPBWelBR6fj4+snaQygeTwcKYUk8OD5fL5ZjR",
+	"47FU80M/Vh++e/vqzfuzN3bMmBLC25yRDnmefHw7iAaeiwwmg6OxncMnj7GSDyaDv42f0bQlMwviboc1",
+	"7RDAD9cKpEoZUv1Oq9zwkikDVdmNu894jlb7UIb8p5DYH5JR5MnKGaHTXE6twUhJ5vXxwnIhc+wXdXKL",
+	"XmWJGTDjSyQd2tqx1uisU/Htm+QrYcpl9bqfozb//djbcpSv71JbLFIb9hUFzJQsmvGwQEZ+0hnLc8uq",
+	"pyz9CkbGokfmMjVoDty2ktEYPjVE2yPQDho0yPM2G0wGnwlu3lfeqQeJehXlWxz87SuHbcX51ZcmAPGD",
+	"T4bu1BcW9YkdWnF6kDHD+qWFfSFtQbgld5KidtLzWRgW7Ftbvtrx+ky5sHrELh8bTRQQxFfrpcrr5cfP",
+	"j55dU0J5s9LJbsFeoMyzrchxiEfRzRdHR9s+26zzsFMjTUOe7R7SqxGlQX/bPaitGaYRL3aPaOp27YBn",
+	"e0yxXk9NYPL5ZLvGtqWp0UDXCqYnASqoaiFsMaupsBrUkZtferVkZLFuFD/ZZcxDUXWXPeQ4RGcmKtRx",
+	"/KReKSR+lwfnqxITz1Zi0Y56oj0O9HnJcDtviMUUc7msWVSGaU6qm2UvlrX4iEsz82uuS6lJnjrB62tc",
+	"k3YRiQsDsU55T8MJLTvtQMZqLrHI5FJYWOu6jIaLnAv0VUP65tzrtf/gXRhXt1uF41096j66hrq7AO5T",
+	"+W72s0He52toITPyFjsxQIsJHM0mlnXO57g5jpfxIK6Ojv6WNidFf2I8SOwc7bo3Vvk7Zhd3JPsad/qE",
+	"fz2pN6bPdpXk31DxGUfvtFVIGcAsJw00AqukVaQUR6CtjWrfSlprKIlFY5rsYbp5a6bWvcl4G8eix0tq",
+	"FYYSJWv9g77sWUFdeB+gL8ogH1wnz28v7HrZ6XsJ2hehiH3HLBnDWd/q9RGgDgmdoTl45WzRTcrpHANc",
+	"byfuQzS3FcuP1YzhrUs47eGoVJB1vGgs9QE+u7rn3z/m6s6lhIJ8axZNLIFa/NXHoNCoFVhLQ41vzwW8",
+	"c2Uw+eVLlye8I0+hE2vkmyGZ2DhzO7yhMos1piArs50rvGoDOWuYBCdOrhJbsOYkWZI9a5vsxmrNBHfh",
+	"Mw0s51/xGHiGRSnt0WyhY7u8fShqjYTqUMT+ZPTG9/PokdO+ZHPvp+m2ve3YnL/Oa2t9kP2E5hWVahjy",
+	"f99IL7gZFbjcz7BC0JRVrvnzrC4n5hqMHN9ao7+j/PwJjVNle2hZOWAFAN54vw7TTlFcUFMO1MbVY8Bn",
+	"mFj0H9dBXlcDlbiXrDl9bRkcd6nydTHcE92Uw8Hw8/kryljKsMzlysr+W9jUP6HZLAB8QATanCyATR6Z",
+	"a0DCJcsr1ONHtAfvCd82qyQ7+NY89EjXZvqFTTLXjeDMAuaNK4Bw2nybAkNZV5fcrCLqECAya+VI1XUD",
+	"UgEHdAs4nKPOu3K5Jozt1YFQcavGpl6EUtKogiTpFJkkMEx+s2wygib95yoZHYOQsaDaEpphklicTHhm",
+	"v94GPSttVaI2t0lPYpH0ayySqC4oqYss7C9rVRZJRFlAsahLRygvo1OIMmob8Lj2Dm0ViS8g8dUlsXAp",
+	"ddyAwgOk5DGuF5iRy1IuRUOU8O7t2fmb99a6FejyyMiklKKzDAZpzqnYqdImUKJi58lc2YUmB7g/Yguc",
+	"jXIbHaq3mbRzmAUzsfDr0TCUChTWf476S1gumHH2bWcBVOojCzLuFsiUmSIzMEwmUHIxT0YWB5aKG4PC",
+	"u+X/9/PvQNs5Mqrp/opYxoL6QxSYcaaslUE+Q8vnaL9Zjh2QhQzqWFzPuzrYtwfPMvjNOBoLWsHXMa1u",
+	"LdUW4deNhMAw2ZgsGTm3SePLcN+23Nt+auqNsPXCLEo87VGjO3qKwrBlLPyMZIHH4hE55HduxKPr2KkU",
+	"qRcPXZhrV1XGtSdrr3zHgrRvGFqAfX4LGc4Vy1DDXLEUZ1Wer4hWfUWZtOYTS1PMLZ5hLDyVoB556N5R",
+	"MHwKRc5geHb2ZtSRDHWSM4mFOg87KBRO8jychX29IrCpdHNNhY93Ff13yPze9CH7vf2B5L4FI/ik9fow",
+	"6V/KagpaW+dsTie2q3Zv24HGYht7bBrwPJBTZKPBzyNHIAiNApyCzeuE6N990OFR3RRUKAo+rM21izay",
+	"XCGjlqtcGz2+BxpwaAHMzrZJBjVHa8IPLq8pUBpmtWb30DkC7eIzrllZknuClIluSgAMvZZnP2+pYqkt",
+	"OaUsw9EYnj49aUPTT5+G/PM0V00uu1wPFsualKw/seOZtrjtMG8av3Ctrq++UCQ9XTxuOvItws3Zg/LP",
+	"jezsvfjn0YPzzwV6+GdUWf5nC9z+KZmuw6Vrma5Vkrd6EEn/ozceRQF0hej7aYB2VZtFhn8wldCDtjkX",
+	"+rurFAZVNwumB9XdOsUSj628EQoEuI+1h/5S38KcxMLmEfU3h37rONswk5uocGM4bZv8dFWz4zrnUSFU",
+	"wsgqXbgITlA5qwlip3ZmIfWfSj0Ln1W0NV4UBuXRvdJ3t0nJFkXDLjTqtP7YaPvxJz24n9D4U2vL0+uW",
+	"KUExcTM9293ucp+K9nibevxwMmqzoO+xFeRtMqqrIVN3jb9U5D+AYGt15H0E22GnLVJZBRx3n1yjN2di",
+	"UmuJtT52bkdJ3XUugWGb+AAfP5+PxrH4LL4KuRR1XYuGGeN5ILebPvXi6OgYhPTxIu36SWIWi9JRc93E",
+	"ey1K0uvZN7gDL3kIIg93FPwPIPQ9hVXLrgUuOyf+Z+MBd45zEHE4kLVQ2kZ1Lgdia5TjR54bVJhF4Ls6",
+	"NC11idAiKCRFNFNLWXUM3HXDicUwaZsGJVSCgsLqGiO60We6AoU5XjKRogsNJ79SErNvVjiOxQ6/USyS",
+	"S47LxJOjC6D7NqOzUJOBY++2pF5dVJBhUFF9ptSoawSDYd2D5uT969HEzgNw4PoTUMLyzhYFfkC3SYEd",
+	"uKVPgX/btSqw7/nWrNz1Ro5C/YMJgr4Tgx9fdzLof6GeIhx38qe/wZl2N2yoWWDdT8MCwt0u5aCqm2vd",
+	"fq2QUpt9NZEd3Evw2l0uTm0krq6izVR5u0uksLdTZKlfbonM1AUyblOjMbwpSrOCl8DyfNvKmh5ZN/Wp",
+	"rNe0r/VV2tAAXdU8v7eFd3p63Wrp3TL+XYunNNemdLZHCVy7Eu8tq+z2JLjRBYLXLkEufdPBXsf90Pxt",
+	"X7P7mnuKTDU9m8lhu2VmahZ7t4l/ptwZVWHkQuVmvx7usWiauDe1a9oqeaXCzHXKZ7qfMPVExyKUMWeZ",
+	"jpaU4QKG50jFlBlieZBz8RWYa+dZpyx57UD7FkAktqktXafcdw1MvU7lgRTQztUoGxyqynN3cYa7Sw2G",
+	"S5z6/+qVMOxbBK5NV6koNQYOjBSoEsp1SeIBfmOpgXKhLMwGyQhYqqTWtazz3Qh6xeIwlRlHPY7Fz707",
+	"4xRqul/BWnKKia8OPRtRt33/v16b97rJRtjc3dG4De2oxVHvm41q8d1Rp+P386OjbsfvULuj4Nxt86TQ",
+	"7O5pePqjHe2Vvjykxtm2tgoom93mVhuto5ouV6ZtLQWd3PffrQ56L470Rldo9Ej/y/YMC+fQ1O2NLnRL",
+	"olm/yWazHdzEVbJlbPVEX9+dlKyxPJc+B97Iwmpu+SpyX6jLWvp35UD4qhy/Hqu4dq6Se0kvJxEk/kK3",
+	"l0ucJr4QjkFS5z92+wjGgnCFwXomZZ135JKQLItAf/cKtP0dqT+VMtrrhMdNXzDIOpe3JK4nWHKL9L3u",
+	"HUUPG+boNVV67EBHtw1pyLD0vRn+ECGPewst1Ie+ScUde/D6EtUWUx1LbJoVHDa9DdzMHJuuFr12n7Hg",
+	"Au673edtEvA7JPCg4uYaJGxh6Tp0/CfwvW9vDrtNutzMb1Zfdb63F95Ke2f9RQ2vjTq2et0WxF0+ZVwz",
+	"h615MUw0qTGQuJSYmVTr7eDsL003uCZlhhkXCBjDGRpq8pq4hb107gEpKNfc2fRtJ3LXGsa+QvfEUD6/",
+	"Wvn7B0lEWnJxRWIkcTSwNs2/TurvCadbZ+08pFQJtep7bI+l70O6IzjhIPuXazIQBvBo6yhoL0l02G0B",
+	"HlY1T8oSRRZS7pr7EkNKnTV1u1qdc/D1rucEqSIfUOhcvPnS4lkSUdej3p2g4fvE5SWnvsB0RXhdXC86",
+	"15z27xZfu9oUTtZWJGheovcamjkvNXBqSZEEHIbJcf/qUh2L7h2ldRNYeOOYg2jqe1xH45526zRfEYuN",
+	"GqA7cpCu0njSNNW4A/d/OM127S7cx24BU3etD8T0PLr/UTJ5HpcFnWTdO7H9NQ3rKnHDbQKcqK4J2TMw",
+	"6e+h8vzD3xoViEeCD0fGwo64h3BkTcg0adNHPEDG964G9K7z+v2Rb/C2sQfQIe6zHqd39YPAZY1WW5Iz",
+	"/yL2fiiU9e/N2KpyUO7TtYm6n3UwkB+KmZLT11d8hfyjvu/pfkhbd1PdPpXrmgqzfHsYommsehPP+qu1",
+	"sijQ1dT5pL3/k80ZF9p0GmE0d5H85eN+QB/3XS4M22Awp7Wr2/c1Fbjs3Grzp/dtV7qf/ef+3pUk3nT8",
+	"eCgds9vP/JEVzG3dRugi07+SxIO5dJRJ1ubSeYb4cFnia01UaqRtJNnOLPEzOTM+V3vi+owlTka8pB7o",
+	"CXFz12M+6XV8TkBLYHkeC1kZbRhl9dTNZzRkHH2nQtdJUKFrD03VhIr8UULCglocu+mBCzh9Fuzd1zSa",
+	"CjfYebHlst1Og6o/dxp6vc3tCLE9Ff0/umfRn9/XvfVIbmYVWUDed1p562GuO5clsVC4YHqBdYNifwHF",
+	"Vj4QdTqkiLkL8gSZAnnA6zby1ji1vJFr4EVRucvBtnKA9m6PB3Uq31jYPhKZeIdyh1z+Mu/Wssq3CcJ+",
+	"07f+zQi/fLHE5BywISPujBV4IBWfcwEnH99CUd9h5hqgH7KSH14+I4r0825rkddetGVpYKrkknQo6hdE",
+	"WZK1eWbXtWmGkDQrmGBzutl8DJ+QeYJec8hQp5UmS/NJk56HsXCt5omONzrLj447zeTps225PpGjX58D",
+	"6+YCqXh17VJnPaojtVx1U7UDi/e5CnsuwuUuBxbR3rNALvwG6JHPBKb838inh1FQ2oOHgNqZwHsEtk7h",
+	"ApVQoNZsjhqGHc889/eo9z3to+4h167Fze97x+3BV1z5Fsm91sjDqm5AnUHdIbn35U4f2sDi2byHRHve",
+	"Wd4mMIY++vNG373OmLbH2ubAphfP1s5qnQ/5ljxXX67+fwAAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -10,7 +10,11 @@ import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
 
 import { isApiError } from "@/api/client";
-import { RouteErrorFallback, RouteNotFound } from "@/components/route-errors";
+import {
+  RouteErrorFallback,
+  RouteNotFound,
+  RoutePending,
+} from "@/components/route-errors";
 import { ThemeProvider } from "@/components/theme";
 import { routeTree } from "./routeTree.gen";
 
@@ -53,6 +57,9 @@ const router = createRouter({
   defaultPreloadStaleTime: 0,
   defaultErrorComponent: RouteErrorFallback,
   defaultNotFoundComponent: RouteNotFound,
+  // Entry navigations (cold load, direct ticket links) block on loaders;
+  // without a pending component the user stares at a blank viewport.
+  defaultPendingComponent: RoutePending,
 });
 
 declare module "@tanstack/react-router" {

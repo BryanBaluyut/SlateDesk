@@ -27,9 +27,11 @@ import (
 	"github.com/BryanBaluyut/slatedesk/internal/auth"
 	"github.com/BryanBaluyut/slatedesk/internal/config"
 	"github.com/BryanBaluyut/slatedesk/internal/db"
+	"github.com/BryanBaluyut/slatedesk/internal/events"
 	"github.com/BryanBaluyut/slatedesk/internal/httpserver"
 	"github.com/BryanBaluyut/slatedesk/internal/migrate"
 	"github.com/BryanBaluyut/slatedesk/internal/settings"
+	"github.com/BryanBaluyut/slatedesk/internal/storage"
 	"github.com/BryanBaluyut/slatedesk/internal/store"
 )
 
@@ -80,6 +82,8 @@ Environment:
   SLATEDESK_ADMIN_PASSWORD  Bootstrap admin password (serve / admin create)
   SLATEDESK_COOKIE_SECURE   Session cookie Secure attribute: auto (default),
                             always, or never
+  SLATEDESK_DATA_DIR        Local data directory for attachment blobs
+                            (default ./data)
 `)
 }
 
@@ -139,7 +143,22 @@ func cmdServe(args []string) error {
 		}
 	}
 
-	return httpserver.New(cfg.Addr, pool, secret, cfg.CookieSecure).Run(ctx)
+	// Realtime spine: pg_notify (fired inside service transactions) ->
+	// dedicated LISTEN connection -> in-process hub -> SSE clients. The
+	// listener reconnects with backoff on its own; canceling ctx stops it.
+	hub := events.NewHub()
+	go func() {
+		_ = events.NewListener(cfg.DatabaseURL, hub).Run(ctx)
+	}()
+
+	// Attachment blob storage (local disk in M2; S3 arrives at M5 behind
+	// the same interface).
+	blobs, err := storage.NewLocal(storage.DataDirFromEnv())
+	if err != nil {
+		return err
+	}
+
+	return httpserver.New(cfg.Addr, pool, secret, cfg.CookieSecure, hub, blobs).Run(ctx)
 }
 
 func cmdMigrate(args []string) error {

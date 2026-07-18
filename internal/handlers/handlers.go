@@ -1,7 +1,8 @@
 // Package handlers implements the generated api.ServerInterface: auth
-// (login/logout/me), users CRUD, and teams CRUD + membership. All errors are
-// RFC 9457 problem+json; authorization is enforced by the RequireUser /
-// RequireRole middleware wired in Router.
+// (login/logout/me), users CRUD, teams CRUD + membership, and the M2 ticket
+// core (tickets, articles, attachments, tags, dashboard counters, SSE
+// events). All errors are RFC 9457 problem+json; authorization is enforced
+// by the RequireUser / RequireRole middleware wired in Router.
 package handlers
 
 import (
@@ -21,8 +22,11 @@ import (
 
 	"github.com/BryanBaluyut/slatedesk/internal/api"
 	"github.com/BryanBaluyut/slatedesk/internal/auth"
+	"github.com/BryanBaluyut/slatedesk/internal/events"
 	"github.com/BryanBaluyut/slatedesk/internal/problem"
+	"github.com/BryanBaluyut/slatedesk/internal/storage"
 	"github.com/BryanBaluyut/slatedesk/internal/store"
+	"github.com/BryanBaluyut/slatedesk/internal/ticket"
 )
 
 // Login rate limits. Per IP+email: loginBurst immediate attempts, then one
@@ -38,11 +42,16 @@ const (
 	loginIPRefill = time.Second
 )
 
-// Handlers implements api.ServerInterface.
+// Handlers implements api.ServerInterface (all operations; the compiler
+// enforces exhaustiveness via the interface assertion below).
 type Handlers struct {
 	pool         *pgxpool.Pool
 	q            *store.Queries
-	secret       []byte // instance secret; signs session cookies
+	svc          *ticket.Service   // transactional ticket-core writes
+	hub          *events.Hub       // in-process SSE fan-out
+	sseSlots     chan struct{}     // bounds concurrent SSE streams (see events.go)
+	blobs        storage.Storage   // attachment blob storage
+	secret       []byte            // instance secret; signs session cookies
 	limiter      *auth.RateLimiter // per IP+email
 	ipLimiter    *auth.RateLimiter // per IP, all emails combined
 	sessionTTL   time.Duration
@@ -52,11 +61,17 @@ type Handlers struct {
 var _ api.ServerInterface = (*Handlers)(nil)
 
 // New returns Handlers backed by pool, signing sessions with the instance
-// secret. cookieSecure controls the session cookie's Secure attribute.
-func New(pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode) *Handlers {
+// secret. cookieSecure controls the session cookie's Secure attribute; hub
+// feeds GET /events subscribers (fill it from an events.Listener); blobs
+// stores attachment bytes.
+func New(pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode, hub *events.Hub, blobs storage.Storage) *Handlers {
 	return &Handlers{
 		pool:         pool,
 		q:            store.New(pool),
+		svc:          ticket.NewService(pool),
+		hub:          hub,
+		sseSlots:     make(chan struct{}, maxEventStreams),
+		blobs:        blobs,
 		secret:       secret,
 		limiter:      auth.NewRateLimiter(loginBurst, loginRefill),
 		ipLimiter:    auth.NewRateLimiter(loginIPBurst, loginIPRefill),
@@ -116,6 +131,37 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	return true
+}
+
+// decodeJSONFields decodes the request body into a field-presence map so
+// handlers can distinguish "omitted" from "explicit null" (tri-state PATCH
+// semantics). Unknown fields and trailing garbage are rejected. On failure a
+// 400 problem is written and ok is false.
+func decodeJSONFields(w http.ResponseWriter, r *http.Request, allowed ...string) (map[string]json.RawMessage, bool) {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	var fields map[string]json.RawMessage
+	if err := dec.Decode(&fields); err != nil {
+		problem.Write(w, r, http.StatusBadRequest, "Bad Request", "invalid JSON body: "+err.Error())
+		return nil, false
+	}
+	if dec.More() {
+		problem.Write(w, r, http.StatusBadRequest, "Bad Request", "invalid JSON body: trailing data")
+		return nil, false
+	}
+	for key := range fields {
+		known := false
+		for _, name := range allowed {
+			if key == name {
+				known = true
+				break
+			}
+		}
+		if !known {
+			problem.Write(w, r, http.StatusBadRequest, "Bad Request", fmt.Sprintf("invalid JSON body: unknown field %q", key))
+			return nil, false
+		}
+	}
+	return fields, true
 }
 
 // serverError logs err and writes a generic 500 problem (no internal detail
@@ -181,4 +227,11 @@ func toAPIUsers(us []store.User) []api.User {
 // toAPITeam converts a store team row to its API representation.
 func toAPITeam(t store.Team) api.Team {
 	return api.Team{Id: t.ID, Name: t.Name, Description: t.Description}
+}
+
+// asString unwraps the interface{}-typed columns sqlc emits for
+// COALESCE(citext::text, ...) expressions; pgx scans them as string.
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
 }

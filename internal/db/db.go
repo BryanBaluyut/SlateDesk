@@ -7,8 +7,23 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// tsvectorOID is the fixed catalog OID of the built-in tsvector type.
+const tsvectorOID = 3614
+
+// RegisterTypes teaches a pgx connection about Postgres types it has no
+// built-in codec for. tsvector (the generated search_tsv columns) is
+// registered with a text codec so `SELECT *` / `RETURNING *` on tickets
+// and articles scans cleanly into the sqlc models (we never parse the
+// value — search runs entirely in SQL). Every pool must install this via
+// AfterConnect (Connect below does; test harnesses mirror it).
+func RegisterTypes(conn *pgx.Conn) {
+	conn.TypeMap().RegisterType(&pgtype.Type{Name: "tsvector", OID: tsvectorOID, Codec: pgtype.TextCodec{}})
+}
 
 // connectTimeout bounds how long Connect keeps retrying the initial ping.
 // Postgres may still be starting (e.g. docker compose bringing both
@@ -22,6 +37,10 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("db: parse DATABASE_URL: %w", err)
+	}
+	poolCfg.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
+		RegisterTypes(conn)
+		return nil
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)

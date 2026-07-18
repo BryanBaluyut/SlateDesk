@@ -12,6 +12,24 @@ export const usersQueryOptions = queryOptions({
   queryFn: () => api.get<User[]>("/users"),
 });
 
+/**
+ * Active agents + admins — the assignable population for tickets. Two role
+ * filters, one merged list, sorted by name for combobox display.
+ */
+export const agentsQueryOptions = queryOptions({
+  queryKey: ["users", "agents"],
+  queryFn: async () => {
+    const [agents, admins] = await Promise.all([
+      api.get<User[]>("/users?role=agent&active=true&limit=200"),
+      api.get<User[]>("/users?role=admin&active=true&limit=200"),
+    ]);
+    return [...agents, ...admins].sort((a, b) =>
+      (a.name || a.email).localeCompare(b.name || b.email),
+    );
+  },
+  staleTime: 5 * 60_000,
+});
+
 export function useCreateUser() {
   const queryClient = useQueryClient();
   return useMutation({

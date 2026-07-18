@@ -12,6 +12,9 @@ internal/web/dist/*
 .env
 *.log
 
+# Default local attachment blob store (SLATEDESK_DATA_DIR=./data)
+/data/
+
 # Claude session config/notes — contains infra details, never commit
 .claude/
 CLAUDE.md
