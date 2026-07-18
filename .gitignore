@@ -11,4 +11,7 @@ internal/web/dist/*
 # Local environment
 .env
 *.log
+
+# Claude session config/notes — contains infra details, never commit
 .claude/
+CLAUDE.md
