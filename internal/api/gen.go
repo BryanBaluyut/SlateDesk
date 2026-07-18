@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -63,6 +64,117 @@ func (e ArticleSenderType) Valid() bool {
 	}
 }
 
+// Defines values for CreateMailboxBasicRequestAuthKind.
+const (
+	CreateMailboxBasicRequestAuthKindBasic CreateMailboxBasicRequestAuthKind = "basic"
+)
+
+// Valid indicates whether the value is a known member of the CreateMailboxBasicRequestAuthKind enum.
+func (e CreateMailboxBasicRequestAuthKind) Valid() bool {
+	switch e {
+	case CreateMailboxBasicRequestAuthKindBasic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateMailboxOauthGoogleRequestAuthKind.
+const (
+	CreateMailboxOauthGoogleRequestAuthKindOauthGoogle CreateMailboxOauthGoogleRequestAuthKind = "oauth_google"
+)
+
+// Valid indicates whether the value is a known member of the CreateMailboxOauthGoogleRequestAuthKind enum.
+func (e CreateMailboxOauthGoogleRequestAuthKind) Valid() bool {
+	switch e {
+	case CreateMailboxOauthGoogleRequestAuthKindOauthGoogle:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateMailboxOauthM365RequestAuthKind.
+const (
+	CreateMailboxOauthM365RequestAuthKindOauthM365 CreateMailboxOauthM365RequestAuthKind = "oauth_m365"
+)
+
+// Valid indicates whether the value is a known member of the CreateMailboxOauthM365RequestAuthKind enum.
+func (e CreateMailboxOauthM365RequestAuthKind) Valid() bool {
+	switch e {
+	case CreateMailboxOauthM365RequestAuthKindOauthM365:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DeliveryStatus.
+const (
+	Failed  DeliveryStatus = "failed"
+	Queued  DeliveryStatus = "queued"
+	Sending DeliveryStatus = "sending"
+	Sent    DeliveryStatus = "sent"
+)
+
+// Valid indicates whether the value is a known member of the DeliveryStatus enum.
+func (e DeliveryStatus) Valid() bool {
+	switch e {
+	case Failed:
+		return true
+	case Queued:
+		return true
+	case Sending:
+		return true
+	case Sent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MailTLSMode.
+const (
+	None     MailTLSMode = "none"
+	Starttls MailTLSMode = "starttls"
+	Tls      MailTLSMode = "tls"
+)
+
+// Valid indicates whether the value is a known member of the MailTLSMode enum.
+func (e MailTLSMode) Valid() bool {
+	switch e {
+	case None:
+		return true
+	case Starttls:
+		return true
+	case Tls:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MailboxAuthKind.
+const (
+	MailboxAuthKindBasic       MailboxAuthKind = "basic"
+	MailboxAuthKindOauthGoogle MailboxAuthKind = "oauth_google"
+	MailboxAuthKindOauthM365   MailboxAuthKind = "oauth_m365"
+)
+
+// Valid indicates whether the value is a known member of the MailboxAuthKind enum.
+func (e MailboxAuthKind) Valid() bool {
+	switch e {
+	case MailboxAuthKindBasic:
+		return true
+	case MailboxAuthKindOauthGoogle:
+		return true
+	case MailboxAuthKindOauthM365:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
 	RoleAdmin    Role = "admin"
@@ -87,6 +199,7 @@ func (e Role) Valid() bool {
 // Defines values for StreamEventType.
 const (
 	ArticleCreated StreamEventType = "article.created"
+	ArticleUpdated StreamEventType = "article.updated"
 	Resync         StreamEventType = "resync"
 	TicketCreated  StreamEventType = "ticket.created"
 	TicketUpdated  StreamEventType = "ticket.updated"
@@ -96,6 +209,8 @@ const (
 func (e StreamEventType) Valid() bool {
 	switch e {
 	case ArticleCreated:
+		return true
+	case ArticleUpdated:
 		return true
 	case Resync:
 		return true
@@ -182,7 +297,9 @@ func (e TicketView) Valid() bool {
 
 // Article One message in a ticket's thread. `body_html`, when present, was
 // sanitized (bluemonday) at write time and is safe to render;
-// `body_text` always exists and feeds search.
+// `body_text` always exists and feeds search. `delivery_status` is
+// the outbound email badge (null on articles that are not outbound
+// email).
 type Article struct {
 	// Attachments Files attached to this article.
 	Attachments []Attachment `json:"attachments"`
@@ -195,9 +312,14 @@ type Article struct {
 	BodyText string  `json:"body_text"`
 
 	// Channel The channel an article arrived through.
-	Channel   ArticleChannel     `json:"channel"`
-	CreatedAt time.Time          `json:"created_at"`
-	Id        openapi_types.UUID `json:"id"`
+	Channel   ArticleChannel `json:"channel"`
+	CreatedAt time.Time      `json:"created_at"`
+
+	// DeliveryStatus Outbound email delivery badge; null on articles that are not
+	// outbound email (inbound mail, internal notes, web/api
+	// articles on tickets without an email origin).
+	DeliveryStatus *DeliveryStatus    `json:"delivery_status"`
+	Id             openapi_types.UUID `json:"id"`
 
 	// IsInternal Internal notes are never shown to customers.
 	IsInternal bool `json:"is_internal"`
@@ -235,6 +357,144 @@ type CreateArticleRequest struct {
 	// IsInternal true = internal note (never customer-visible, never changes
 	// status); false = public reply.
 	IsInternal bool `json:"is_internal"`
+}
+
+// CreateMailboxBasicRequest Password-authenticated IMAP/SMTP mailbox.
+type CreateMailboxBasicRequest struct {
+	Active         *bool                             `json:"active,omitempty"`
+	AuthKind       CreateMailboxBasicRequestAuthKind `json:"auth_kind"`
+	AutoAckEnabled *bool                             `json:"auto_ack_enabled,omitempty"`
+	EmailAddress   openapi_types.Email               `json:"email_address"`
+
+	// FromDisplayName Defaults to '' (the mailbox name is used).
+	FromDisplayName *string `json:"from_display_name,omitempty"`
+	ImapHost        string  `json:"imap_host"`
+	ImapPort        int     `json:"imap_port"`
+
+	// ImapTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	ImapTlsMode  *MailTLSMode `json:"imap_tls_mode,omitempty"`
+	ImapUsername string       `json:"imap_username"`
+	Name         string       `json:"name"`
+
+	// Password IMAP/SMTP login password. Write-only: encrypted at rest,
+	// never returned by any response.
+	Password *string `json:"password,omitempty"`
+
+	// Signature Defaults to ''.
+	Signature *string `json:"signature,omitempty"`
+	SmtpHost  string  `json:"smtp_host"`
+	SmtpPort  int     `json:"smtp_port"`
+
+	// SmtpTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	SmtpTlsMode  *MailTLSMode `json:"smtp_tls_mode,omitempty"`
+	SmtpUsername string       `json:"smtp_username"`
+}
+
+// CreateMailboxBasicRequestAuthKind defines model for CreateMailboxBasicRequest.AuthKind.
+type CreateMailboxBasicRequestAuthKind string
+
+// CreateMailboxOauthGoogleRequest Google Workspace/Gmail mailbox (authorization-code XOAUTH2). The
+// offline refresh token is NOT part of this request — after
+// creating the mailbox, run `POST
+// /mailboxes/{id}/oauth/google/start` and complete the browser
+// consent flow; the callback stores the refresh token.
+type CreateMailboxOauthGoogleRequest struct {
+	Active         *bool                                   `json:"active,omitempty"`
+	AuthKind       CreateMailboxOauthGoogleRequestAuthKind `json:"auth_kind"`
+	AutoAckEnabled *bool                                   `json:"auto_ack_enabled,omitempty"`
+
+	// ClientId Google OAuth client id. Write-only here; echoed back (not
+	// secret) as `oauth_client_id`.
+	ClientId *string `json:"client_id,omitempty"`
+
+	// ClientSecret Google OAuth client secret. Write-only: encrypted at
+	// rest, never returned by any response.
+	ClientSecret *string             `json:"client_secret,omitempty"`
+	EmailAddress openapi_types.Email `json:"email_address"`
+
+	// FromDisplayName Defaults to '' (the mailbox name is used).
+	FromDisplayName *string `json:"from_display_name,omitempty"`
+	ImapHost        string  `json:"imap_host"`
+	ImapPort        int     `json:"imap_port"`
+
+	// ImapTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	ImapTlsMode  *MailTLSMode `json:"imap_tls_mode,omitempty"`
+	ImapUsername string       `json:"imap_username"`
+	Name         string       `json:"name"`
+
+	// Signature Defaults to ''.
+	Signature *string `json:"signature,omitempty"`
+	SmtpHost  string  `json:"smtp_host"`
+	SmtpPort  int     `json:"smtp_port"`
+
+	// SmtpTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	SmtpTlsMode  *MailTLSMode `json:"smtp_tls_mode,omitempty"`
+	SmtpUsername string       `json:"smtp_username"`
+}
+
+// CreateMailboxOauthGoogleRequestAuthKind defines model for CreateMailboxOauthGoogleRequest.AuthKind.
+type CreateMailboxOauthGoogleRequestAuthKind string
+
+// CreateMailboxOauthM365Request Microsoft 365 mailbox (Entra app registration, client-credentials
+// XOAUTH2). Per-mailbox access is restricted Entra-side via
+// application access policies.
+type CreateMailboxOauthM365Request struct {
+	Active         *bool                                 `json:"active,omitempty"`
+	AuthKind       CreateMailboxOauthM365RequestAuthKind `json:"auth_kind"`
+	AutoAckEnabled *bool                                 `json:"auto_ack_enabled,omitempty"`
+
+	// ClientId App registration client id. Write-only here; echoed back
+	// (not secret) as `oauth_client_id`.
+	ClientId *string `json:"client_id,omitempty"`
+
+	// ClientSecret App registration client secret. Write-only: encrypted at
+	// rest, never returned by any response.
+	ClientSecret *string             `json:"client_secret,omitempty"`
+	EmailAddress openapi_types.Email `json:"email_address"`
+
+	// FromDisplayName Defaults to '' (the mailbox name is used).
+	FromDisplayName *string `json:"from_display_name,omitempty"`
+	ImapHost        string  `json:"imap_host"`
+	ImapPort        int     `json:"imap_port"`
+
+	// ImapTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	ImapTlsMode  *MailTLSMode `json:"imap_tls_mode,omitempty"`
+	ImapUsername string       `json:"imap_username"`
+	Name         string       `json:"name"`
+
+	// Signature Defaults to ''.
+	Signature *string `json:"signature,omitempty"`
+	SmtpHost  string  `json:"smtp_host"`
+	SmtpPort  int     `json:"smtp_port"`
+
+	// SmtpTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	SmtpTlsMode  *MailTLSMode `json:"smtp_tls_mode,omitempty"`
+	SmtpUsername string       `json:"smtp_username"`
+
+	// TenantId Entra tenant id. Write-only here; echoed back (not
+	// secret) as `oauth_tenant_id`.
+	TenantId *string `json:"tenant_id,omitempty"`
+}
+
+// CreateMailboxOauthM365RequestAuthKind defines model for CreateMailboxOauthM365Request.AuthKind.
+type CreateMailboxOauthM365RequestAuthKind string
+
+// CreateMailboxRequest Mailbox creation payload, discriminated on `auth_kind`; each
+// kind carries its own write-only credential fields.
+type CreateMailboxRequest struct {
+	union json.RawMessage
 }
 
 // CreateTagRequest defines model for CreateTagRequest.
@@ -299,10 +559,173 @@ type DashboardCounters struct {
 	WaitingOnCustomer int64 `json:"waiting_on_customer"`
 }
 
+// DeliveryStatus Outbound email delivery state of an article. Transitions:
+//
+//   - `queued` — the article and its send job committed in one
+//     transaction; the job has not started yet.
+//   - `queued → sending` — the send worker committed the outbound
+//     Message-ID (threading is safe from here on) and is dialing
+//     SMTP. On worker crash the job retries from here with the
+//     same Message-ID.
+//   - `sending → sent` — the SMTP server accepted the message.
+//     Terminal.
+//   - `sending → failed` — every retry (capped backoff) failed.
+//     Terminal, shown as a visible badge; `POST
+//     /articles/{id}/retry-send` moves it back to `queued`.
+//   - `sending → queued` — recovery only: a worker crash on the
+//     final attempt can strand the badge on `sending` (the job is
+//     discarded without running); retry-send accepts that stuck
+//     state once no live send job remains.
+//
+// Every transition emits an `article.updated` stream event.
+type DeliveryStatus string
+
+// ExternalUrlSetting The instance's public base URL setting.
+type ExternalUrlSetting struct {
+	// ExternalUrl Absolute http(s) base URL the instance is reached at, no
+	// trailing slash (e.g. "https://desk.example.com"); '' until
+	// configured.
+	ExternalUrl string `json:"external_url"`
+}
+
+// GoogleOauthStart Where to send the admin's browser to grant consent.
+type GoogleOauthStart struct {
+	// AuthorizationUrl Google authorization URL (authorization-code flow with
+	// `access_type=offline`, signed single-use `state`).
+	AuthorizationUrl string `json:"authorization_url"`
+}
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Email    openapi_types.Email `json:"email"`
 	Password string              `json:"password"`
+}
+
+// MailTLSMode TLS posture of a mail connection: `tls` (implicit TLS),
+// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+// local dev/test servers only; never use in production).
+type MailTLSMode string
+
+// Mailbox A configured email mailbox: connection config plus the health
+// columns behind the admin screen's health pills. Credentials
+// (password, client secret, OAuth tokens) are **never** included
+// in any response.
+type Mailbox struct {
+	// Active Inactive mailboxes are neither polled nor sent through.
+	Active bool `json:"active"`
+
+	// AuthKind How the mailbox authenticates to its IMAP/SMTP servers: `basic`
+	// (username + password), `oauth_m365` (Entra client-credentials
+	// XOAUTH2), `oauth_google` (Google authorization-code XOAUTH2 with
+	// an offline refresh token).
+	AuthKind MailboxAuthKind `json:"auth_kind"`
+
+	// AutoAckEnabled Send the loop-guarded auto-acknowledgement for new tickets.
+	AutoAckEnabled bool      `json:"auto_ack_enabled"`
+	CreatedAt      time.Time `json:"created_at"`
+
+	// EmailAddress The address this mailbox sends and receives as. Unique.
+	EmailAddress openapi_types.Email `json:"email_address"`
+
+	// FromDisplayName From header display name ('' = use the mailbox name).
+	FromDisplayName string             `json:"from_display_name"`
+	Id              openapi_types.UUID `json:"id"`
+	ImapHost        string             `json:"imap_host"`
+	ImapPort        int                `json:"imap_port"`
+
+	// ImapTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	ImapTlsMode  MailTLSMode `json:"imap_tls_mode"`
+	ImapUsername string      `json:"imap_username"`
+
+	// LastError Most recent poll/send error; null when healthy.
+	LastError *string `json:"last_error"`
+
+	// LastErrorAt When last_error occurred; null when healthy.
+	LastErrorAt *time.Time `json:"last_error_at"`
+
+	// LastPollAt Last successful poll; null before the first success. Stays at
+	// the last success while errors occur, so "last worked at" is
+	// visible next to the error.
+	LastPollAt *time.Time `json:"last_poll_at"`
+
+	// Name Display name of the mailbox (e.g. "Support").
+	Name string `json:"name"`
+
+	// OauthClientId OAuth client id; null for basic-auth mailboxes.
+	OauthClientId *string `json:"oauth_client_id"`
+
+	// OauthTenantId Entra tenant id; null unless auth_kind is oauth_m365.
+	OauthTenantId *string `json:"oauth_tenant_id"`
+
+	// Signature Appended to outbound mail ('' = none).
+	Signature string `json:"signature"`
+	SmtpHost  string `json:"smtp_host"`
+	SmtpPort  int    `json:"smtp_port"`
+
+	// SmtpTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	SmtpTlsMode  MailTLSMode `json:"smtp_tls_mode"`
+	SmtpUsername string      `json:"smtp_username"`
+	UpdatedAt    time.Time   `json:"updated_at"`
+}
+
+// MailboxAuthKind How the mailbox authenticates to its IMAP/SMTP servers: `basic`
+// (username + password), `oauth_m365` (Entra client-credentials
+// XOAUTH2), `oauth_google` (Google authorization-code XOAUTH2 with
+// an offline refresh token).
+type MailboxAuthKind string
+
+// MailboxConfig Writable connection/config fields shared by every mailbox create
+// variant (credential fields live on the variants).
+type MailboxConfig struct {
+	Active         *bool               `json:"active,omitempty"`
+	AutoAckEnabled *bool               `json:"auto_ack_enabled,omitempty"`
+	EmailAddress   openapi_types.Email `json:"email_address"`
+
+	// FromDisplayName Defaults to '' (the mailbox name is used).
+	FromDisplayName *string `json:"from_display_name,omitempty"`
+	ImapHost        string  `json:"imap_host"`
+	ImapPort        int     `json:"imap_port"`
+
+	// ImapTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	ImapTlsMode  *MailTLSMode `json:"imap_tls_mode,omitempty"`
+	ImapUsername string       `json:"imap_username"`
+	Name         string       `json:"name"`
+
+	// Signature Defaults to ''.
+	Signature *string `json:"signature,omitempty"`
+	SmtpHost  string  `json:"smtp_host"`
+	SmtpPort  int     `json:"smtp_port"`
+
+	// SmtpTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	SmtpTlsMode  *MailTLSMode `json:"smtp_tls_mode,omitempty"`
+	SmtpUsername string       `json:"smtp_username"`
+}
+
+// MailboxTestResult Outcome of a live mailbox connectivity test. `ok=false` still
+// arrives as HTTP 200 — the test ran; this object is its result.
+type MailboxTestResult struct {
+	// Detail Human-readable outcome — the failing step and error on
+	// failure (e.g. "IMAP AUTHENTICATE: invalid credentials"), a
+	// short success summary otherwise.
+	Detail string `json:"detail"`
+
+	// LatencyMs Wall-clock duration of the whole test.
+	LatencyMs int64 `json:"latency_ms"`
+	Ok        bool  `json:"ok"`
+}
+
+// MailboxTestSendRequest defines model for MailboxTestSendRequest.
+type MailboxTestSendRequest struct {
+	// To Recipient of the test message.
+	To openapi_types.Email `json:"to"`
 }
 
 // Problem RFC 9457 problem details. Media type application/problem+json.
@@ -325,6 +748,13 @@ type Problem struct {
 
 // Role User role.
 type Role string
+
+// SetExternalUrlRequest defines model for SetExternalUrlRequest.
+type SetExternalUrlRequest struct {
+	// ExternalUrl Absolute http(s) base URL with no path, query, or fragment;
+	// a trailing slash is stripped before storage.
+	ExternalUrl string `json:"external_url"`
+}
 
 // SetTeamMembersRequest defines model for SetTeamMembersRequest.
 type SetTeamMembersRequest struct {
@@ -477,6 +907,57 @@ type TicketStatus string
 // status), `closed` (closed only).
 type TicketView string
 
+// UpdateMailboxRequest Partial update; omitted fields are left unchanged. The write-only
+// credential fields rotate stored secrets and are never echoed:
+// `password` applies to `basic`; `tenant_id`, `client_id`,
+// `client_secret` apply to the OAuth kinds. When `auth_kind`
+// changes, the credential fields required by the new kind must be
+// supplied in the same request (400 otherwise).
+type UpdateMailboxRequest struct {
+	Active *bool `json:"active,omitempty"`
+
+	// AuthKind How the mailbox authenticates to its IMAP/SMTP servers: `basic`
+	// (username + password), `oauth_m365` (Entra client-credentials
+	// XOAUTH2), `oauth_google` (Google authorization-code XOAUTH2 with
+	// an offline refresh token).
+	AuthKind       *MailboxAuthKind `json:"auth_kind,omitempty"`
+	AutoAckEnabled *bool            `json:"auto_ack_enabled,omitempty"`
+
+	// ClientId New OAuth client id (oauth_m365 / oauth_google).
+	ClientId *string `json:"client_id,omitempty"`
+
+	// ClientSecret New OAuth client secret (oauth_m365 / oauth_google). Never
+	// echoed. Rotating an oauth_google client invalidates the
+	// stored refresh token — re-run the Google connect flow.
+	ClientSecret    *string              `json:"client_secret,omitempty"`
+	EmailAddress    *openapi_types.Email `json:"email_address,omitempty"`
+	FromDisplayName *string              `json:"from_display_name,omitempty"`
+	ImapHost        *string              `json:"imap_host,omitempty"`
+	ImapPort        *int                 `json:"imap_port,omitempty"`
+
+	// ImapTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	ImapTlsMode  *MailTLSMode `json:"imap_tls_mode,omitempty"`
+	ImapUsername *string      `json:"imap_username,omitempty"`
+	Name         *string      `json:"name,omitempty"`
+
+	// Password New password (basic auth). Never echoed.
+	Password  *string `json:"password,omitempty"`
+	Signature *string `json:"signature,omitempty"`
+	SmtpHost  *string `json:"smtp_host,omitempty"`
+	SmtpPort  *int    `json:"smtp_port,omitempty"`
+
+	// SmtpTlsMode TLS posture of a mail connection: `tls` (implicit TLS),
+	// `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+	// local dev/test servers only; never use in production).
+	SmtpTlsMode  *MailTLSMode `json:"smtp_tls_mode,omitempty"`
+	SmtpUsername *string      `json:"smtp_username,omitempty"`
+
+	// TenantId New Entra tenant id (oauth_m365).
+	TenantId *string `json:"tenant_id,omitempty"`
+}
+
 // UpdateTagRequest Partial update; omitted fields are left unchanged; explicit
 // `color: null` clears the color.
 type UpdateTagRequest struct {
@@ -548,6 +1029,9 @@ type ArticleID = openapi_types.UUID
 // AttachmentID defines model for AttachmentID.
 type AttachmentID = openapi_types.UUID
 
+// MailboxID defines model for MailboxID.
+type MailboxID = openapi_types.UUID
+
 // TagID defines model for TagID.
 type TagID = openapi_types.UUID
 
@@ -579,6 +1063,18 @@ type Unauthorized = Problem
 type UploadArticleAttachmentMultipartBody struct {
 	// File The file to attach (max 25 MiB).
 	File openapi_types.File `json:"file"`
+}
+
+// MailboxGoogleOauthCallbackParams defines parameters for MailboxGoogleOauthCallback.
+type MailboxGoogleOauthCallbackParams struct {
+	// State Signed single-use state minted by the start operation.
+	State string `form:"state" json:"state"`
+
+	// Code Authorization code (present on provider success).
+	Code *string `form:"code,omitempty" json:"code,omitempty"`
+
+	// Error Provider error code (e.g. `access_denied`), if any.
+	Error *string `form:"error,omitempty" json:"error,omitempty"`
 }
 
 // ListTicketsParams defines parameters for ListTickets.
@@ -643,6 +1139,18 @@ type UploadArticleAttachmentMultipartRequestBody UploadArticleAttachmentMultipar
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
+// CreateMailboxJSONRequestBody defines body for CreateMailbox for application/json ContentType.
+type CreateMailboxJSONRequestBody = CreateMailboxRequest
+
+// UpdateMailboxJSONRequestBody defines body for UpdateMailbox for application/json ContentType.
+type UpdateMailboxJSONRequestBody = UpdateMailboxRequest
+
+// TestMailboxSendJSONRequestBody defines body for TestMailboxSend for application/json ContentType.
+type TestMailboxSendJSONRequestBody = MailboxTestSendRequest
+
+// SetExternalUrlJSONRequestBody defines body for SetExternalUrl for application/json ContentType.
+type SetExternalUrlJSONRequestBody = SetExternalUrlRequest
+
 // CreateTagJSONRequestBody defines body for CreateTag for application/json ContentType.
 type CreateTagJSONRequestBody = CreateTagRequest
 
@@ -676,11 +1184,151 @@ type CreateUserJSONRequestBody = CreateUserRequest
 // UpdateUserJSONRequestBody defines body for UpdateUser for application/json ContentType.
 type UpdateUserJSONRequestBody = UpdateUserRequest
 
+// AsCreateMailboxBasicRequest returns the union data inside the CreateMailboxRequest as a CreateMailboxBasicRequest
+func (t CreateMailboxRequest) AsCreateMailboxBasicRequest() (CreateMailboxBasicRequest, error) {
+	var body CreateMailboxBasicRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCreateMailboxBasicRequest overwrites any union data inside the CreateMailboxRequest as the provided CreateMailboxBasicRequest
+func (t *CreateMailboxRequest) FromCreateMailboxBasicRequest(v CreateMailboxBasicRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"auth_kind":"basic"}`))
+	t.union = b
+	return err
+}
+
+// MergeCreateMailboxBasicRequest performs a merge with any union data inside the CreateMailboxRequest, using the provided CreateMailboxBasicRequest
+func (t *CreateMailboxRequest) MergeCreateMailboxBasicRequest(v CreateMailboxBasicRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"auth_kind":"basic"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsCreateMailboxOauthM365Request returns the union data inside the CreateMailboxRequest as a CreateMailboxOauthM365Request
+func (t CreateMailboxRequest) AsCreateMailboxOauthM365Request() (CreateMailboxOauthM365Request, error) {
+	var body CreateMailboxOauthM365Request
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCreateMailboxOauthM365Request overwrites any union data inside the CreateMailboxRequest as the provided CreateMailboxOauthM365Request
+func (t *CreateMailboxRequest) FromCreateMailboxOauthM365Request(v CreateMailboxOauthM365Request) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"auth_kind":"oauth_m365"}`))
+	t.union = b
+	return err
+}
+
+// MergeCreateMailboxOauthM365Request performs a merge with any union data inside the CreateMailboxRequest, using the provided CreateMailboxOauthM365Request
+func (t *CreateMailboxRequest) MergeCreateMailboxOauthM365Request(v CreateMailboxOauthM365Request) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"auth_kind":"oauth_m365"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsCreateMailboxOauthGoogleRequest returns the union data inside the CreateMailboxRequest as a CreateMailboxOauthGoogleRequest
+func (t CreateMailboxRequest) AsCreateMailboxOauthGoogleRequest() (CreateMailboxOauthGoogleRequest, error) {
+	var body CreateMailboxOauthGoogleRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCreateMailboxOauthGoogleRequest overwrites any union data inside the CreateMailboxRequest as the provided CreateMailboxOauthGoogleRequest
+func (t *CreateMailboxRequest) FromCreateMailboxOauthGoogleRequest(v CreateMailboxOauthGoogleRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"auth_kind":"oauth_google"}`))
+	t.union = b
+	return err
+}
+
+// MergeCreateMailboxOauthGoogleRequest performs a merge with any union data inside the CreateMailboxRequest, using the provided CreateMailboxOauthGoogleRequest
+func (t *CreateMailboxRequest) MergeCreateMailboxOauthGoogleRequest(v CreateMailboxOauthGoogleRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b, err = runtime.JSONMerge(b, []byte(`{"auth_kind":"oauth_google"}`))
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t CreateMailboxRequest) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"auth_kind"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t CreateMailboxRequest) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "basic":
+		return t.AsCreateMailboxBasicRequest()
+	case "oauth_google":
+		return t.AsCreateMailboxOauthGoogleRequest()
+	case "oauth_m365":
+		return t.AsCreateMailboxOauthM365Request()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t CreateMailboxRequest) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *CreateMailboxRequest) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// UploadArticleAttachment Upload an attachment to an article
 	// (POST /articles/{id}/attachments)
 	UploadArticleAttachment(w http.ResponseWriter, r *http.Request, id ArticleID)
+	// RetryArticleSend Retry a failed outbound email delivery
+	// (POST /articles/{id}/retry-send)
+	RetryArticleSend(w http.ResponseWriter, r *http.Request, id ArticleID)
 	// DownloadAttachment Download an attachment
 	// (GET /attachments/{id})
 	DownloadAttachment(w http.ResponseWriter, r *http.Request, id AttachmentID)
@@ -699,6 +1347,39 @@ type ServerInterface interface {
 	// StreamEvents Realtime event stream (SSE)
 	// (GET /events)
 	StreamEvents(w http.ResponseWriter, r *http.Request)
+	// ListMailboxes List mailboxes
+	// (GET /mailboxes)
+	ListMailboxes(w http.ResponseWriter, r *http.Request)
+	// CreateMailbox Create a mailbox
+	// (POST /mailboxes)
+	CreateMailbox(w http.ResponseWriter, r *http.Request)
+	// MailboxGoogleOauthCallback Google OAuth redirect target
+	// (GET /mailboxes/oauth/google/callback)
+	MailboxGoogleOauthCallback(w http.ResponseWriter, r *http.Request, params MailboxGoogleOauthCallbackParams)
+	// DeleteMailbox Delete a mailbox
+	// (DELETE /mailboxes/{id})
+	DeleteMailbox(w http.ResponseWriter, r *http.Request, id MailboxID)
+	// GetMailbox Get a mailbox
+	// (GET /mailboxes/{id})
+	GetMailbox(w http.ResponseWriter, r *http.Request, id MailboxID)
+	// UpdateMailbox Update a mailbox
+	// (PATCH /mailboxes/{id})
+	UpdateMailbox(w http.ResponseWriter, r *http.Request, id MailboxID)
+	// StartMailboxGoogleOauth Start the Google OAuth connect flow
+	// (POST /mailboxes/{id}/oauth/google/start)
+	StartMailboxGoogleOauth(w http.ResponseWriter, r *http.Request, id MailboxID)
+	// TestMailboxFetch Test the mailbox's IMAP connection
+	// (POST /mailboxes/{id}/test-fetch)
+	TestMailboxFetch(w http.ResponseWriter, r *http.Request, id MailboxID)
+	// TestMailboxSend Send a test email through the mailbox
+	// (POST /mailboxes/{id}/test-send)
+	TestMailboxSend(w http.ResponseWriter, r *http.Request, id MailboxID)
+	// GetExternalUrl Get the instance external URL
+	// (GET /settings/external-url)
+	GetExternalUrl(w http.ResponseWriter, r *http.Request)
+	// SetExternalUrl Set the instance external URL
+	// (PUT /settings/external-url)
+	SetExternalUrl(w http.ResponseWriter, r *http.Request)
 	// ListTags List tags
 	// (GET /tags)
 	ListTags(w http.ResponseWriter, r *http.Request)
@@ -774,6 +1455,12 @@ func (_ Unimplemented) UploadArticleAttachment(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RetryArticleSend Retry a failed outbound email delivery
+// (POST /articles/{id}/retry-send)
+func (_ Unimplemented) RetryArticleSend(w http.ResponseWriter, r *http.Request, id ArticleID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // DownloadAttachment Download an attachment
 // (GET /attachments/{id})
 func (_ Unimplemented) DownloadAttachment(w http.ResponseWriter, r *http.Request, id AttachmentID) {
@@ -807,6 +1494,72 @@ func (_ Unimplemented) GetDashboardCounters(w http.ResponseWriter, r *http.Reque
 // StreamEvents Realtime event stream (SSE)
 // (GET /events)
 func (_ Unimplemented) StreamEvents(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListMailboxes List mailboxes
+// (GET /mailboxes)
+func (_ Unimplemented) ListMailboxes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateMailbox Create a mailbox
+// (POST /mailboxes)
+func (_ Unimplemented) CreateMailbox(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// MailboxGoogleOauthCallback Google OAuth redirect target
+// (GET /mailboxes/oauth/google/callback)
+func (_ Unimplemented) MailboxGoogleOauthCallback(w http.ResponseWriter, r *http.Request, params MailboxGoogleOauthCallbackParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteMailbox Delete a mailbox
+// (DELETE /mailboxes/{id})
+func (_ Unimplemented) DeleteMailbox(w http.ResponseWriter, r *http.Request, id MailboxID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetMailbox Get a mailbox
+// (GET /mailboxes/{id})
+func (_ Unimplemented) GetMailbox(w http.ResponseWriter, r *http.Request, id MailboxID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateMailbox Update a mailbox
+// (PATCH /mailboxes/{id})
+func (_ Unimplemented) UpdateMailbox(w http.ResponseWriter, r *http.Request, id MailboxID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartMailboxGoogleOauth Start the Google OAuth connect flow
+// (POST /mailboxes/{id}/oauth/google/start)
+func (_ Unimplemented) StartMailboxGoogleOauth(w http.ResponseWriter, r *http.Request, id MailboxID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestMailboxFetch Test the mailbox's IMAP connection
+// (POST /mailboxes/{id}/test-fetch)
+func (_ Unimplemented) TestMailboxFetch(w http.ResponseWriter, r *http.Request, id MailboxID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestMailboxSend Send a test email through the mailbox
+// (POST /mailboxes/{id}/test-send)
+func (_ Unimplemented) TestMailboxSend(w http.ResponseWriter, r *http.Request, id MailboxID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetExternalUrl Get the instance external URL
+// (GET /settings/external-url)
+func (_ Unimplemented) GetExternalUrl(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetExternalUrl Set the instance external URL
+// (PUT /settings/external-url)
+func (_ Unimplemented) SetExternalUrl(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -971,6 +1724,32 @@ func (siw *ServerInterfaceWrapper) UploadArticleAttachment(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
+// RetryArticleSend operation middleware
+func (siw *ServerInterfaceWrapper) RetryArticleSend(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id ArticleID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetryArticleSend(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DownloadAttachment operation middleware
 func (siw *ServerInterfaceWrapper) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 
@@ -1058,6 +1837,277 @@ func (siw *ServerInterfaceWrapper) StreamEvents(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StreamEvents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMailboxes operation middleware
+func (siw *ServerInterfaceWrapper) ListMailboxes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMailboxes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMailbox operation middleware
+func (siw *ServerInterfaceWrapper) CreateMailbox(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMailbox(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MailboxGoogleOauthCallback operation middleware
+func (siw *ServerInterfaceWrapper) MailboxGoogleOauthCallback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params MailboxGoogleOauthCallbackParams
+
+	// ------------- Required query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "state"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "code" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "code", r.URL.Query(), &params.Code, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "code"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "code", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "error" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "error", r.URL.Query(), &params.Error, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "error"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "error", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MailboxGoogleOauthCallback(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteMailbox operation middleware
+func (siw *ServerInterfaceWrapper) DeleteMailbox(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id MailboxID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteMailbox(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMailbox operation middleware
+func (siw *ServerInterfaceWrapper) GetMailbox(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id MailboxID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMailbox(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateMailbox operation middleware
+func (siw *ServerInterfaceWrapper) UpdateMailbox(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id MailboxID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateMailbox(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartMailboxGoogleOauth operation middleware
+func (siw *ServerInterfaceWrapper) StartMailboxGoogleOauth(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id MailboxID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartMailboxGoogleOauth(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestMailboxFetch operation middleware
+func (siw *ServerInterfaceWrapper) TestMailboxFetch(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id MailboxID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestMailboxFetch(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestMailboxSend operation middleware
+func (siw *ServerInterfaceWrapper) TestMailboxSend(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id MailboxID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestMailboxSend(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetExternalUrl operation middleware
+func (siw *ServerInterfaceWrapper) GetExternalUrl(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetExternalUrl(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetExternalUrl operation middleware
+func (siw *ServerInterfaceWrapper) SetExternalUrl(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetExternalUrl(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1901,6 +2951,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/articles/{id}/attachments", wrapper.UploadArticleAttachment)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/articles/{id}/retry-send", wrapper.RetryArticleSend)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/attachments/{id}", wrapper.DownloadAttachment)
 	})
 	r.Group(func(r chi.Router) {
@@ -1921,6 +2974,39 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/events", wrapper.StreamEvents)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/mailboxes", wrapper.ListMailboxes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/mailboxes", wrapper.CreateMailbox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/mailboxes/{id}", wrapper.DeleteMailbox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/mailboxes/{id}", wrapper.GetMailbox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/mailboxes/{id}", wrapper.UpdateMailbox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/mailboxes/{id}/test-fetch", wrapper.TestMailboxFetch)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/mailboxes/{id}/test-send", wrapper.TestMailboxSend)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/mailboxes/{id}/oauth/google/start", wrapper.StartMailboxGoogleOauth)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/mailboxes/oauth/google/callback", wrapper.MailboxGoogleOauthCallback)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/settings/external-url", wrapper.GetExternalUrl)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/settings/external-url", wrapper.SetExternalUrl)
+	})
 
 	return r
 }
@@ -1930,141 +3016,234 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

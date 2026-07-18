@@ -105,6 +105,44 @@ func (q *Queries) DeactivateUser(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const ensureUserByEmail = `-- name: EnsureUserByEmail :one
+INSERT INTO users (email, name, role)
+VALUES ($1, $2, 'customer')
+ON CONFLICT (email) DO UPDATE
+SET email = users.email
+RETURNING id, email, name, role, password_hash, oidc_issuer, oidc_subject, company, token_version, active, created_at, updated_at
+`
+
+type EnsureUserByEmailParams struct {
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+// M3 inbound email: look up the sender by address (citext, so case folds),
+// creating a CUSTOMER on first contact. The conflict arm is a deliberate
+// no-op self-assignment: an existing user is returned unchanged — in
+// particular their role — so an unknown sender can NEVER be auto-created
+// as (or promoted to) agent/admin via email (architecture doc §4).
+func (q *Queries) EnsureUserByEmail(ctx context.Context, arg EnsureUserByEmailParams) (User, error) {
+	row := q.db.QueryRow(ctx, ensureUserByEmail, arg.Email, arg.Name)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Name,
+		&i.Role,
+		&i.PasswordHash,
+		&i.OidcIssuer,
+		&i.OidcSubject,
+		&i.Company,
+		&i.TokenVersion,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, name, role, password_hash, oidc_issuer, oidc_subject, company, token_version, active, created_at, updated_at FROM users
 WHERE email = $1

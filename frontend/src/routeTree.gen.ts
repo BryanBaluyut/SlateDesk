@@ -18,7 +18,9 @@ import { Route as AuthTeamsRouteImport } from './routes/_auth.teams'
 import { Route as AuthSettingsRouteImport } from './routes/_auth.settings'
 import { Route as AuthDashboardRouteImport } from './routes/_auth.dashboard'
 import { Route as AuthTicketsIndexRouteImport } from './routes/_auth.tickets.index'
+import { Route as AuthSettingsIndexRouteImport } from './routes/_auth.settings.index'
 import { Route as AuthTicketsTicketIdRouteImport } from './routes/_auth.tickets.$ticketId'
+import { Route as AuthSettingsMailboxesRouteImport } from './routes/_auth.settings.mailboxes'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -64,31 +66,44 @@ const AuthTicketsIndexRoute = AuthTicketsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthTicketsRoute,
 } as any)
+const AuthSettingsIndexRoute = AuthSettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AuthSettingsRoute,
+} as any)
 const AuthTicketsTicketIdRoute = AuthTicketsTicketIdRouteImport.update({
   id: '/$ticketId',
   path: '/$ticketId',
   getParentRoute: () => AuthTicketsRoute,
+} as any)
+const AuthSettingsMailboxesRoute = AuthSettingsMailboxesRouteImport.update({
+  id: '/mailboxes',
+  path: '/mailboxes',
+  getParentRoute: () => AuthSettingsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthIndexRoute
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthDashboardRoute
-  '/settings': typeof AuthSettingsRoute
+  '/settings': typeof AuthSettingsRouteWithChildren
   '/teams': typeof AuthTeamsRoute
   '/tickets': typeof AuthTicketsRouteWithChildren
   '/users': typeof AuthUsersRoute
+  '/settings/mailboxes': typeof AuthSettingsMailboxesRoute
   '/tickets/$ticketId': typeof AuthTicketsTicketIdRoute
+  '/settings/': typeof AuthSettingsIndexRoute
   '/tickets/': typeof AuthTicketsIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/dashboard': typeof AuthDashboardRoute
-  '/settings': typeof AuthSettingsRoute
   '/teams': typeof AuthTeamsRoute
   '/users': typeof AuthUsersRoute
   '/': typeof AuthIndexRoute
+  '/settings/mailboxes': typeof AuthSettingsMailboxesRoute
   '/tickets/$ticketId': typeof AuthTicketsTicketIdRoute
+  '/settings': typeof AuthSettingsIndexRoute
   '/tickets': typeof AuthTicketsIndexRoute
 }
 export interface FileRoutesById {
@@ -96,12 +111,14 @@ export interface FileRoutesById {
   '/_auth': typeof AuthRouteWithChildren
   '/login': typeof LoginRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
-  '/_auth/settings': typeof AuthSettingsRoute
+  '/_auth/settings': typeof AuthSettingsRouteWithChildren
   '/_auth/teams': typeof AuthTeamsRoute
   '/_auth/tickets': typeof AuthTicketsRouteWithChildren
   '/_auth/users': typeof AuthUsersRoute
   '/_auth/': typeof AuthIndexRoute
+  '/_auth/settings/mailboxes': typeof AuthSettingsMailboxesRoute
   '/_auth/tickets/$ticketId': typeof AuthTicketsTicketIdRoute
+  '/_auth/settings/': typeof AuthSettingsIndexRoute
   '/_auth/tickets/': typeof AuthTicketsIndexRoute
 }
 export interface FileRouteTypes {
@@ -114,17 +131,20 @@ export interface FileRouteTypes {
     | '/teams'
     | '/tickets'
     | '/users'
+    | '/settings/mailboxes'
     | '/tickets/$ticketId'
+    | '/settings/'
     | '/tickets/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
     | '/dashboard'
-    | '/settings'
     | '/teams'
     | '/users'
     | '/'
+    | '/settings/mailboxes'
     | '/tickets/$ticketId'
+    | '/settings'
     | '/tickets'
   id:
     | '__root__'
@@ -136,7 +156,9 @@ export interface FileRouteTypes {
     | '/_auth/tickets'
     | '/_auth/users'
     | '/_auth/'
+    | '/_auth/settings/mailboxes'
     | '/_auth/tickets/$ticketId'
+    | '/_auth/settings/'
     | '/_auth/tickets/'
   fileRoutesById: FileRoutesById
 }
@@ -210,6 +232,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthTicketsIndexRouteImport
       parentRoute: typeof AuthTicketsRoute
     }
+    '/_auth/settings/': {
+      id: '/_auth/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AuthSettingsIndexRouteImport
+      parentRoute: typeof AuthSettingsRoute
+    }
     '/_auth/tickets/$ticketId': {
       id: '/_auth/tickets/$ticketId'
       path: '/$ticketId'
@@ -217,8 +246,29 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthTicketsTicketIdRouteImport
       parentRoute: typeof AuthTicketsRoute
     }
+    '/_auth/settings/mailboxes': {
+      id: '/_auth/settings/mailboxes'
+      path: '/mailboxes'
+      fullPath: '/settings/mailboxes'
+      preLoaderRoute: typeof AuthSettingsMailboxesRouteImport
+      parentRoute: typeof AuthSettingsRoute
+    }
   }
 }
+
+interface AuthSettingsRouteChildren {
+  AuthSettingsMailboxesRoute: typeof AuthSettingsMailboxesRoute
+  AuthSettingsIndexRoute: typeof AuthSettingsIndexRoute
+}
+
+const AuthSettingsRouteChildren: AuthSettingsRouteChildren = {
+  AuthSettingsMailboxesRoute: AuthSettingsMailboxesRoute,
+  AuthSettingsIndexRoute: AuthSettingsIndexRoute,
+}
+
+const AuthSettingsRouteWithChildren = AuthSettingsRoute._addFileChildren(
+  AuthSettingsRouteChildren,
+)
 
 interface AuthTicketsRouteChildren {
   AuthTicketsTicketIdRoute: typeof AuthTicketsTicketIdRoute
@@ -236,7 +286,7 @@ const AuthTicketsRouteWithChildren = AuthTicketsRoute._addFileChildren(
 
 interface AuthRouteChildren {
   AuthDashboardRoute: typeof AuthDashboardRoute
-  AuthSettingsRoute: typeof AuthSettingsRoute
+  AuthSettingsRoute: typeof AuthSettingsRouteWithChildren
   AuthTeamsRoute: typeof AuthTeamsRoute
   AuthTicketsRoute: typeof AuthTicketsRouteWithChildren
   AuthUsersRoute: typeof AuthUsersRoute
@@ -245,7 +295,7 @@ interface AuthRouteChildren {
 
 const AuthRouteChildren: AuthRouteChildren = {
   AuthDashboardRoute: AuthDashboardRoute,
-  AuthSettingsRoute: AuthSettingsRoute,
+  AuthSettingsRoute: AuthSettingsRouteWithChildren,
   AuthTeamsRoute: AuthTeamsRoute,
   AuthTicketsRoute: AuthTicketsRouteWithChildren,
   AuthUsersRoute: AuthUsersRoute,

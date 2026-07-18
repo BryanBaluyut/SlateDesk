@@ -96,6 +96,7 @@ var ticketCoreSuffixes = []string{
 	"/tickets/{id}/tags",
 	"/tickets/{id}/articles",
 	"/articles/{id}/attachments",
+	"/articles/{id}/retry-send",
 	"/attachments/{id}",
 	"/tags",
 	"/tags/{id}",
@@ -140,10 +141,12 @@ func hasAnySuffix(pattern string, suffixes []string) bool {
 //   - /auth/login, /auth/logout: public (spec: security [])
 //   - /auth/me:                  any authenticated user
 //   - DELETE /tags/{id}:         admin only (the one stricter M2 rule)
-//   - ticket core (tickets, articles, attachments, tags, dashboard,
-//     events):                   agent or admin
+//   - ticket core (tickets, articles incl. retry-send, attachments, tags,
+//     dashboard, events):        agent or admin
 //   - GET on users/teams:        agent or admin (workspace pickers)
-//   - everything else:           admin only (users/teams management)
+//   - everything else:           admin only (users/teams management, the
+//     whole M3 /mailboxes + /settings surface incl. the Google OAuth
+//     callback)
 //
 // It runs inside the generated route wrapper, so the chi route pattern is
 // already resolved; matching on the pattern suffix keeps the policy

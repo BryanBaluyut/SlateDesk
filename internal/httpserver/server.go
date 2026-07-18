@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BryanBaluyut/slatedesk/internal/auth"
+	"github.com/BryanBaluyut/slatedesk/internal/email"
 	"github.com/BryanBaluyut/slatedesk/internal/events"
 	"github.com/BryanBaluyut/slatedesk/internal/handlers"
 	"github.com/BryanBaluyut/slatedesk/internal/problem"
@@ -31,9 +32,16 @@ type Server struct {
 // called. secret is the instance root secret (session cookie signing);
 // cookieSecure controls the session cookie's Secure attribute; hub feeds
 // the SSE endpoint (run an events.Listener into it); blobs stores
-// attachment bytes.
-func New(addr string, pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode, hub *events.Hub, blobs storage.Storage) *Server {
+// attachment bytes; engine is the M3 email engine (ticket mailer + the
+// mailbox admin surface); kicker (nil-able) pokes the in-process mailbox
+// supervisor after mailbox mutations.
+func New(addr string, pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode, hub *events.Hub, blobs storage.Storage, engine *email.Engine, kicker handlers.Kicker) (*Server, error) {
 	s := &Server{pool: pool}
+
+	h, err := handlers.New(pool, secret, cookieSecure, hub, blobs, engine, kicker)
+	if err != nil {
+		return nil, fmt.Errorf("httpserver: build handlers: %w", err)
+	}
 
 	r := chi.NewRouter()
 	r.Use(requestLogger)
@@ -58,7 +66,7 @@ func New(addr string, pool *pgxpool.Pool, secret []byte, cookieSecure auth.Cooki
 		api.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 			problem.Write(w, r, http.StatusMethodNotAllowed, "Method Not Allowed", "")
 		})
-		api.Mount("/v1", handlers.New(pool, secret, cookieSecure, hub, blobs).Router())
+		api.Mount("/v1", h.Router())
 	})
 
 	// Everything else: embedded SPA with client-side-routing fallback.
@@ -69,7 +77,7 @@ func New(addr string, pool *pgxpool.Pool, secret []byte, cookieSecure auth.Cooki
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	return s
+	return s, nil
 }
 
 // Run serves until ctx is canceled, then shuts down gracefully with a

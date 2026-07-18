@@ -155,3 +155,35 @@ export function useCreateArticle(ticketId: string) {
       api.post<Article>(`/tickets/${ticketId}/articles`, body),
   });
 }
+
+/**
+ * POST /articles/{id}/retry-send — re-enqueue a `failed` outbound email
+ * delivery. The 202 body is the article back in `queued`; patch it into
+ * the detail cache for instant badge feedback (later transitions arrive
+ * as SSE `article.updated` invalidations).
+ */
+export function useRetryArticleSend(ticketId: string) {
+  const queryClient = useQueryClient();
+  const detailKey = ["tickets", "detail", ticketId] as const;
+  return useMutation({
+    mutationFn: (articleId: string) =>
+      api.post<Article>(`/articles/${articleId}/retry-send`),
+    onSuccess: (article) => {
+      queryClient.setQueryData<TicketDetail>(detailKey, (previous) =>
+        previous
+          ? {
+              ...previous,
+              articles: previous.articles.map((a) =>
+                a.id === article.id ? article : a,
+              ),
+            }
+          : previous,
+      );
+    },
+    onError: () => {
+      // 409 = no longer `failed` (a concurrent retry, or the badge was
+      // stale). The server holds the truth — refetch the thread.
+      void queryClient.invalidateQueries({ queryKey: detailKey });
+    },
+  });
+}

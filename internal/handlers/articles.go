@@ -16,6 +16,7 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/BryanBaluyut/slatedesk/internal/api"
+	"github.com/BryanBaluyut/slatedesk/internal/email"
 	"github.com/BryanBaluyut/slatedesk/internal/problem"
 	"github.com/BryanBaluyut/slatedesk/internal/storage"
 	"github.com/BryanBaluyut/slatedesk/internal/store"
@@ -61,6 +62,10 @@ func toAPIArticle(a store.Article, authorName, authorEmail string, attachments [
 	if a.BodyHtml.Valid {
 		html := a.BodyHtml.String
 		out.BodyHtml = &html
+	}
+	if a.DeliveryStatus.Valid {
+		ds := api.DeliveryStatus(a.DeliveryStatus.String)
+		out.DeliveryStatus = &ds
 	}
 	return out
 }
@@ -113,6 +118,58 @@ func (h *Handlers) CreateTicketArticle(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	writeJSON(w, r, http.StatusCreated, toAPIArticle(article, caller.Name, caller.Email, []api.Attachment{}))
+}
+
+// RetryArticleSend implements POST /articles/{id}/retry-send (agent/
+// admin): re-enqueues the email delivery of an outbound article whose
+// delivery_status is the terminal 'failed' — or stuck on 'sending' with
+// no live send job left (worker crashed on the final attempt). The engine
+// flips the badge back to 'queued' and inserts the email_send job in ONE
+// transaction; the retried send reuses the Message-ID committed before
+// the first attempt, so a duplicate delivery can never fork the thread.
+func (h *Handlers) RetryArticleSend(w http.ResponseWriter, r *http.Request, id api.ArticleID) {
+	if h.engine == nil {
+		serverError(w, r, "retry article send", errors.New("email engine not configured"))
+		return
+	}
+	article, err := h.engine.RetryFailedSend(r.Context(), id)
+	if err != nil {
+		switch {
+		case isNoRows(err):
+			problem.Write(w, r, http.StatusNotFound, "Not Found", "no such article")
+		case errors.Is(err, email.ErrRetryNotFailed):
+			problem.Write(w, r, http.StatusConflict, "Conflict",
+				"the article's delivery is not in a retryable state")
+		case errors.Is(err, email.ErrRetryNoMailbox):
+			problem.Write(w, r, http.StatusConflict, "Conflict",
+				"no mailbox is available to deliver this article")
+		default:
+			serverError(w, r, "retry article send", err)
+		}
+		return
+	}
+
+	authorName, authorEmail := "", ""
+	if article.AuthorID.Valid {
+		author, err := h.q.GetUserByID(r.Context(), uuid.UUID(article.AuthorID.Bytes))
+		if err != nil && !isNoRows(err) {
+			serverError(w, r, "load article author", err)
+			return
+		}
+		if err == nil {
+			authorName, authorEmail = author.Name, author.Email
+		}
+	}
+	attRows, err := h.q.ListArticleAttachments(r.Context(), article.ID)
+	if err != nil {
+		serverError(w, r, "list article attachments", err)
+		return
+	}
+	atts := make([]api.Attachment, 0, len(attRows))
+	for _, att := range attRows {
+		atts = append(atts, toAPIAttachment(att))
+	}
+	writeJSON(w, r, http.StatusAccepted, toAPIArticle(article, authorName, authorEmail, atts))
 }
 
 // sanitizeFilename reduces a client-supplied filename to a safe base name:

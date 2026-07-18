@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, PanelRight, Paperclip } from "lucide-react";
+import { Check, Copy, Mail, PanelRight, Paperclip } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { meQueryOptions } from "@/api/auth";
@@ -11,6 +11,7 @@ import { agentsQueryOptions } from "@/api/users";
 import { initials } from "@/components/layout/topbar";
 import { PriorityBadge, StatusBadge } from "@/components/tickets/badges";
 import { Composer } from "@/components/tickets/composer";
+import { DeliveryBadge } from "@/components/tickets/delivery-badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { formatBytes, formatFullTime, formatThreadTime } from "@/lib/time";
@@ -223,16 +224,33 @@ function ArticleItem({ article }: { article: Article }) {
               : "bg-muted/50",
         )}
       >
-        <div className="mb-1 flex items-baseline gap-2 text-xs">
+        <div className="mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
           <span className="font-medium">{authorName}</span>
           {article.is_internal && (
             <span className="rounded-sm border border-amber-500/50 bg-amber-500/15 px-1 font-medium tracking-wide text-amber-700 uppercase dark:border-amber-400/40 dark:text-amber-300">
               Internal
             </span>
           )}
-          {article.channel !== "web" && (
-            <span className="text-muted-foreground">via {article.channel}</span>
+          {article.channel === "email" ? (
+            <span
+              className="inline-flex items-center gap-1 text-muted-foreground"
+              title={
+                article.delivery_status !== null
+                  ? "Sent by email"
+                  : "Received by email"
+              }
+            >
+              <Mail className="size-3 shrink-0" aria-hidden="true" />
+              email
+            </span>
+          ) : (
+            article.channel !== "web" && (
+              <span className="text-muted-foreground">
+                via {article.channel}
+              </span>
+            )
           )}
+          <DeliveryBadge article={article} />
           <span
             className="ml-auto pl-3 text-muted-foreground"
             title={formatFullTime(article.created_at)}

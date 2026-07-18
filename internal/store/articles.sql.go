@@ -342,3 +342,143 @@ func (q *Queries) ListTicketEvents(ctx context.Context, ticketID uuid.UUID) ([]T
 	}
 	return items, nil
 }
+
+const markFailedArticleQueued = `-- name: MarkFailedArticleQueued :one
+UPDATE articles
+SET delivery_status = 'queued'
+WHERE id = $1 AND delivery_status IN ('failed', 'sending')
+RETURNING id, ticket_id, author_id, sender_type, channel, is_internal, body_text, body_html, message_id, in_reply_to, references_header, delivery_status, created_at, search_tsv
+`
+
+// Retry-send (POST /articles/{id}/retry-send): flip a dead delivery back
+// to queued. 'failed' is the terminal badge; 'sending' is accepted only
+// for the stuck-badge case — a crash during the final send attempt whose
+// job River's rescuer discarded without re-running the worker — and the
+// caller (RetryFailedSend) verifies no live send job exists first. The
+// status predicate makes the transition atomic: a concurrent retry sees
+// no row and answers 409 instead of enqueueing a duplicate job.
+func (q *Queries) MarkFailedArticleQueued(ctx context.Context, id uuid.UUID) (Article, error) {
+	row := q.db.QueryRow(ctx, markFailedArticleQueued, id)
+	var i Article
+	err := row.Scan(
+		&i.ID,
+		&i.TicketID,
+		&i.AuthorID,
+		&i.SenderType,
+		&i.Channel,
+		&i.IsInternal,
+		&i.BodyText,
+		&i.BodyHtml,
+		&i.MessageID,
+		&i.InReplyTo,
+		&i.ReferencesHeader,
+		&i.DeliveryStatus,
+		&i.CreatedAt,
+		&i.SearchTsv,
+	)
+	return i, err
+}
+
+const setArticleDeliveryStatus = `-- name: SetArticleDeliveryStatus :one
+UPDATE articles
+SET delivery_status = $2
+WHERE id = $1
+RETURNING id, ticket_id, author_id, sender_type, channel, is_internal, body_text, body_html, message_id, in_reply_to, references_header, delivery_status, created_at, search_tsv
+`
+
+type SetArticleDeliveryStatusParams struct {
+	ID             uuid.UUID   `json:"id"`
+	DeliveryStatus pgtype.Text `json:"delivery_status"`
+}
+
+// Outbound delivery badge transitions: queued -> sending -> sent | failed.
+func (q *Queries) SetArticleDeliveryStatus(ctx context.Context, arg SetArticleDeliveryStatusParams) (Article, error) {
+	row := q.db.QueryRow(ctx, setArticleDeliveryStatus, arg.ID, arg.DeliveryStatus)
+	var i Article
+	err := row.Scan(
+		&i.ID,
+		&i.TicketID,
+		&i.AuthorID,
+		&i.SenderType,
+		&i.Channel,
+		&i.IsInternal,
+		&i.BodyText,
+		&i.BodyHtml,
+		&i.MessageID,
+		&i.InReplyTo,
+		&i.ReferencesHeader,
+		&i.DeliveryStatus,
+		&i.CreatedAt,
+		&i.SearchTsv,
+	)
+	return i, err
+}
+
+const setArticleEmailMeta = `-- name: SetArticleEmailMeta :one
+UPDATE articles
+SET message_id        = $1,
+    in_reply_to       = $2,
+    references_header = $3,
+    delivery_status   = $4
+WHERE id = $5
+RETURNING id, ticket_id, author_id, sender_type, channel, is_internal, body_text, body_html, message_id, in_reply_to, references_header, delivery_status, created_at, search_tsv
+`
+
+type SetArticleEmailMetaParams struct {
+	MessageID        pgtype.Text `json:"message_id"`
+	InReplyTo        pgtype.Text `json:"in_reply_to"`
+	ReferencesHeader pgtype.Text `json:"references_header"`
+	DeliveryStatus   pgtype.Text `json:"delivery_status"`
+	ID               uuid.UUID   `json:"id"`
+}
+
+// M3 email engine: stamp the email headers (and, for outbound, the
+// delivery status) onto an article inside the ingest/send transaction.
+// Message-IDs are stored canonically (no angle brackets).
+func (q *Queries) SetArticleEmailMeta(ctx context.Context, arg SetArticleEmailMetaParams) (Article, error) {
+	row := q.db.QueryRow(ctx, setArticleEmailMeta,
+		arg.MessageID,
+		arg.InReplyTo,
+		arg.ReferencesHeader,
+		arg.DeliveryStatus,
+		arg.ID,
+	)
+	var i Article
+	err := row.Scan(
+		&i.ID,
+		&i.TicketID,
+		&i.AuthorID,
+		&i.SenderType,
+		&i.Channel,
+		&i.IsInternal,
+		&i.BodyText,
+		&i.BodyHtml,
+		&i.MessageID,
+		&i.InReplyTo,
+		&i.ReferencesHeader,
+		&i.DeliveryStatus,
+		&i.CreatedAt,
+		&i.SearchTsv,
+	)
+	return i, err
+}
+
+const ticketHasSystemEmailArticle = `-- name: TicketHasSystemEmailArticle :one
+SELECT EXISTS (
+    SELECT 1 FROM articles
+    WHERE ticket_id = $1 AND sender_type = 'system' AND channel = 'email'
+      AND is_internal = false
+)::boolean AS has_ack
+`
+
+// Auto-ack idempotency guard: has this ticket already received the PUBLIC
+// system-generated email article (the auto-ack)? is_internal must be
+// filtered: the attachment-drop notice is also sender_type=system +
+// channel=email but internal, and counting it would silently suppress the
+// ack for any new ticket whose first mail blew the attachment cap.
+func (q *Queries) TicketHasSystemEmailArticle(ctx context.Context, ticketID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, ticketHasSystemEmailArticle, ticketID)
+	var has_ack bool
+	err := row.Scan(&has_ack)
+	return has_ack, err
+}

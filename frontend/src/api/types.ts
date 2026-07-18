@@ -42,6 +42,24 @@ export type CreateArticleRequest =
 export type CreateTagRequest = components["schemas"]["CreateTagRequest"];
 export type UpdateTagRequest = components["schemas"]["UpdateTagRequest"];
 
+// Email channel (M3).
+export type ArticleChannel = components["schemas"]["ArticleChannel"];
+export type DeliveryStatus = components["schemas"]["DeliveryStatus"];
+export type Mailbox = components["schemas"]["Mailbox"];
+export type MailboxAuthKind = components["schemas"]["MailboxAuthKind"];
+export type MailTLSMode = components["schemas"]["MailTLSMode"];
+export type CreateMailboxRequest =
+  components["schemas"]["CreateMailboxRequest"];
+export type UpdateMailboxRequest =
+  components["schemas"]["UpdateMailboxRequest"];
+export type MailboxTestResult = components["schemas"]["MailboxTestResult"];
+export type MailboxTestSendRequest =
+  components["schemas"]["MailboxTestSendRequest"];
+export type GoogleOauthStart = components["schemas"]["GoogleOauthStart"];
+export type ExternalUrlSetting = components["schemas"]["ExternalUrlSetting"];
+export type SetExternalUrlRequest =
+  components["schemas"]["SetExternalUrlRequest"];
+
 export const ROLES: readonly Role[] = ["customer", "agent", "admin"] as const;
 
 export const TICKET_STATUSES: readonly TicketStatus[] = [
@@ -84,4 +102,22 @@ export const VIEW_LABELS: Record<TicketView, string> = {
   unassigned: "Unassigned",
   open: "All open",
   closed: "Closed",
+};
+
+export const MAILBOX_AUTH_KIND_LABELS: Record<MailboxAuthKind, string> = {
+  basic: "IMAP/SMTP password",
+  oauth_m365: "Microsoft 365",
+  oauth_google: "Google",
+};
+
+export const TLS_MODES: readonly MailTLSMode[] = [
+  "tls",
+  "starttls",
+  "none",
+] as const;
+
+export const TLS_MODE_LABELS: Record<MailTLSMode, string> = {
+  tls: "TLS",
+  starttls: "STARTTLS",
+  none: "None (dev only)",
 };

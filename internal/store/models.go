@@ -99,6 +99,134 @@ func (ns NullArticleSender) Value() (driver.Value, error) {
 	return string(ns.ArticleSender), nil
 }
 
+type EmailDirection string
+
+const (
+	EmailDirectionInbound  EmailDirection = "inbound"
+	EmailDirectionOutbound EmailDirection = "outbound"
+)
+
+func (e *EmailDirection) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = EmailDirection(s)
+	case string:
+		*e = EmailDirection(s)
+	default:
+		return fmt.Errorf("unsupported scan type for EmailDirection: %T", src)
+	}
+	return nil
+}
+
+type NullEmailDirection struct {
+	EmailDirection EmailDirection `json:"email_direction"`
+	Valid          bool           `json:"valid"` // Valid is true if EmailDirection is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullEmailDirection) Scan(value interface{}) error {
+	if value == nil {
+		ns.EmailDirection, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.EmailDirection.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullEmailDirection) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.EmailDirection), nil
+}
+
+type MailTlsMode string
+
+const (
+	MailTlsModeTls      MailTlsMode = "tls"
+	MailTlsModeStarttls MailTlsMode = "starttls"
+	MailTlsModeNone     MailTlsMode = "none"
+)
+
+func (e *MailTlsMode) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = MailTlsMode(s)
+	case string:
+		*e = MailTlsMode(s)
+	default:
+		return fmt.Errorf("unsupported scan type for MailTlsMode: %T", src)
+	}
+	return nil
+}
+
+type NullMailTlsMode struct {
+	MailTlsMode MailTlsMode `json:"mail_tls_mode"`
+	Valid       bool        `json:"valid"` // Valid is true if MailTlsMode is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMailTlsMode) Scan(value interface{}) error {
+	if value == nil {
+		ns.MailTlsMode, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.MailTlsMode.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMailTlsMode) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.MailTlsMode), nil
+}
+
+type MailboxAuthKind string
+
+const (
+	MailboxAuthKindBasic       MailboxAuthKind = "basic"
+	MailboxAuthKindOauthM365   MailboxAuthKind = "oauth_m365"
+	MailboxAuthKindOauthGoogle MailboxAuthKind = "oauth_google"
+)
+
+func (e *MailboxAuthKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = MailboxAuthKind(s)
+	case string:
+		*e = MailboxAuthKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for MailboxAuthKind: %T", src)
+	}
+	return nil
+}
+
+type NullMailboxAuthKind struct {
+	MailboxAuthKind MailboxAuthKind `json:"mailbox_auth_kind"`
+	Valid           bool            `json:"valid"` // Valid is true if MailboxAuthKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMailboxAuthKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.MailboxAuthKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.MailboxAuthKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMailboxAuthKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.MailboxAuthKind), nil
+}
+
 type TicketPriority string
 
 const (
@@ -255,6 +383,48 @@ type ArticleAttachment struct {
 	SizeBytes   int64     `json:"size_bytes"`
 	StorageKey  string    `json:"storage_key"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type EmailMessageID struct {
+	MessageID string         `json:"message_id"`
+	Direction EmailDirection `json:"direction"`
+	MailboxID pgtype.UUID    `json:"mailbox_id"`
+	TicketID  uuid.UUID      `json:"ticket_id"`
+	ArticleID pgtype.UUID    `json:"article_id"`
+	CreatedAt time.Time      `json:"created_at"`
+}
+
+type Mailbox struct {
+	ID              uuid.UUID          `json:"id"`
+	Name            string             `json:"name"`
+	EmailAddress    string             `json:"email_address"`
+	Active          bool               `json:"active"`
+	AuthKind        MailboxAuthKind    `json:"auth_kind"`
+	ImapHost        string             `json:"imap_host"`
+	ImapPort        int32              `json:"imap_port"`
+	ImapTlsMode     MailTlsMode        `json:"imap_tls_mode"`
+	ImapUsername    string             `json:"imap_username"`
+	SmtpHost        string             `json:"smtp_host"`
+	SmtpPort        int32              `json:"smtp_port"`
+	SmtpTlsMode     MailTlsMode        `json:"smtp_tls_mode"`
+	SmtpUsername    string             `json:"smtp_username"`
+	CredentialsEnc  string             `json:"credentials_enc"`
+	OauthTenantID   pgtype.Text        `json:"oauth_tenant_id"`
+	OauthClientID   pgtype.Text        `json:"oauth_client_id"`
+	FromDisplayName string             `json:"from_display_name"`
+	Signature       string             `json:"signature"`
+	AutoAckEnabled  bool               `json:"auto_ack_enabled"`
+	LastPollAt      pgtype.Timestamptz `json:"last_poll_at"`
+	LastError       pgtype.Text        `json:"last_error"`
+	LastErrorAt     pgtype.Timestamptz `json:"last_error_at"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
+type MailboxLease struct {
+	MailboxID uuid.UUID `json:"mailbox_id"`
+	Owner     string    `json:"owner"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 type Setting struct {

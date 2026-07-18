@@ -37,7 +37,26 @@ const (
 	NotifyTicketCreated  = "ticket.created"
 	NotifyTicketUpdated  = "ticket.updated"
 	NotifyArticleCreated = "article.created"
+	// NotifyArticleUpdated fires on M3 delivery-status transitions
+	// (queued/sending/sent/failed badge refreshes).
+	NotifyArticleUpdated = "article.updated"
 )
+
+// Mailer is the email channel's hook into ticket-core transactions
+// (implemented by internal/email.Engine; the interface lives here so the
+// dependency points ticket <- email, never the reverse). Both methods run
+// INSIDE the service's transaction on tx: the job enqueue commits or rolls
+// back atomically with the ticket write — a reply can never be saved
+// without its email durably queued (architecture doc §1).
+type Mailer interface {
+	// EnqueueAgentReply is called for every public agent reply. The
+	// implementation no-ops for tickets without an email origin, so
+	// non-email tickets behave exactly as before M3.
+	EnqueueAgentReply(ctx context.Context, tx pgx.Tx, ticketID, articleID uuid.UUID) error
+	// EnqueueAssigneeNotify is called when a ticket gains an assignee.
+	// The implementation skips self-assignment.
+	EnqueueAssigneeNotify(ctx context.Context, tx pgx.Tx, ticketID, assigneeID uuid.UUID, actorID *uuid.UUID) error
+}
 
 // ticket_events audit row types.
 const (
@@ -55,6 +74,11 @@ type Service struct {
 	pool *pgxpool.Pool
 	html *bluemonday.Policy
 
+	// mailer, when set (M3+ wiring), receives in-transaction hooks for
+	// outbound email. nil = email channel disabled; all writes behave as
+	// in M2.
+	mailer Mailer
+
 	// now is swappable in tests (ticket-number day rollover).
 	now func() time.Time
 }
@@ -68,6 +92,10 @@ func NewService(pool *pgxpool.Pool) *Service {
 		now:  time.Now,
 	}
 }
+
+// SetMailer wires the email channel's transaction hooks (call once during
+// process wiring, before the service takes traffic).
+func (s *Service) SetMailer(m Mailer) { s.mailer = m }
 
 // nextStatusOnArticle is the add-article status matrix.
 //
@@ -241,6 +269,22 @@ func (s *Service) AddArticle(ctx context.Context, ticketID uuid.UUID, in Article
 			return err
 		}
 
+		// M3: a public agent reply on an email-origin ticket queues its
+		// outbound email in THIS transaction (the mailer no-ops for
+		// non-email tickets). Article + job commit or roll back together.
+		if s.mailer != nil && in.SenderType == store.ArticleSenderAgent && !in.IsInternal {
+			if err := s.mailer.EnqueueAgentReply(ctx, tx, t.ID, article.ID); err != nil {
+				return fmt.Errorf("enqueue outbound email: %w", err)
+			}
+			// The mailer marks the article queued (delivery_status et al)
+			// inside this transaction; re-read so the caller's response
+			// carries the delivery badge instead of a stale NULL.
+			article, err = q.GetArticle(ctx, article.ID)
+			if err != nil {
+				return fmt.Errorf("reload article after enqueue: %w", err)
+			}
+		}
+
 		if next := nextStatusOnArticle(t.Status, in.SenderType, in.IsInternal); next != t.Status {
 			if _, err := q.UpdateTicketStatus(ctx, store.UpdateTicketStatusParams{ID: t.ID, Status: next}); err != nil {
 				return fmt.Errorf("flip status: %w", err)
@@ -337,6 +381,13 @@ func (s *Service) UpdateFields(ctx context.Context, ticketID uuid.UUID, p Update
 				"from": uuidOrNil(t.AssigneeID), "to": p.AssigneeID,
 			}); err != nil {
 				return err
+			}
+			// M3: notify the new assignee by email (job enqueued in THIS
+			// transaction; the mailer skips self-assignment).
+			if s.mailer != nil && p.AssigneeID != nil {
+				if err := s.mailer.EnqueueAssigneeNotify(ctx, tx, t.ID, *p.AssigneeID, actorID); err != nil {
+					return fmt.Errorf("enqueue assignee notification: %w", err)
+				}
 			}
 			changed = true
 		}

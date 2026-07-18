@@ -1,10 +1,13 @@
 // Command slatedesk is the SlateDesk server binary.
 //
-// Subcommands:
+// Subcommands (one binary, three roles — architecture doc §4):
 //
-//	serve         start the HTTP server (default; applies migrations first)
-//	migrate       apply pending database migrations and exit
-//	admin create  create or update an admin user
+//	serve             start the HTTP server with embedded job workers
+//	                  (default; applies migrations first)
+//	serve --no-worker HTTP only; job enqueue works, another process works them
+//	worker            job workers only, no HTTP (applies migrations first)
+//	migrate           apply pending database migrations and exit
+//	admin create      create or update an admin user
 //
 // Configuration comes from the environment: DATABASE_URL (required),
 // SLATEDESK_ADDR (default :8000), and optionally SLATEDESK_ADMIN_EMAIL /
@@ -20,6 +23,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,9 +31,13 @@ import (
 	"github.com/BryanBaluyut/slatedesk/internal/auth"
 	"github.com/BryanBaluyut/slatedesk/internal/config"
 	"github.com/BryanBaluyut/slatedesk/internal/db"
+	"github.com/BryanBaluyut/slatedesk/internal/email"
 	"github.com/BryanBaluyut/slatedesk/internal/events"
+	"github.com/BryanBaluyut/slatedesk/internal/handlers"
 	"github.com/BryanBaluyut/slatedesk/internal/httpserver"
+	"github.com/BryanBaluyut/slatedesk/internal/jobs"
 	"github.com/BryanBaluyut/slatedesk/internal/migrate"
+	"github.com/BryanBaluyut/slatedesk/internal/secrets"
 	"github.com/BryanBaluyut/slatedesk/internal/settings"
 	"github.com/BryanBaluyut/slatedesk/internal/storage"
 	"github.com/BryanBaluyut/slatedesk/internal/store"
@@ -49,6 +57,8 @@ func main() {
 	switch cmd {
 	case "serve":
 		err = cmdServe(args)
+	case "worker":
+		err = cmdWorker(args)
 	case "migrate":
 		err = cmdMigrate(args)
 	case "admin":
@@ -70,7 +80,10 @@ func usage(w *os.File) {
 	fmt.Fprint(w, `Usage: slatedesk [command]
 
 Commands:
-  serve         Start the HTTP server (default). Applies migrations first.
+  serve         Start the HTTP server with embedded job workers (default).
+                Applies migrations first. --no-worker disables the embedded
+                workers (run at least one worker elsewhere).
+  worker        Run job workers only, no HTTP. Applies migrations first.
   migrate       Apply pending database migrations and exit.
   admin create  Create or update an admin user.
   help          Show this help.
@@ -95,6 +108,7 @@ func signalContext() (context.Context, context.CancelFunc) {
 func cmdServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	addrFlag := fs.String("addr", "", "listen address (overrides SLATEDESK_ADDR)")
+	noWorker := fs.Bool("no-worker", false, "serve HTTP only; do not run embedded job workers")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -158,7 +172,167 @@ func cmdServe(args []string) error {
 		return err
 	}
 
-	return httpserver.New(cfg.Addr, pool, secret, cfg.CookieSecure, hub, blobs).Run(ctx)
+	// Email engine (M3): credential crypto, inbound pipeline, outbound
+	// sender. It is also the ticket service's Mailer, so agent replies
+	// enqueue their email atomically even in --no-worker mode (the job is
+	// then worked by a separate `slatedesk worker`).
+	box, err := secrets.NewBox(secret, secrets.PurposeMailboxCredentials)
+	if err != nil {
+		return err
+	}
+	engine := email.NewEngine(pool, email.NewAuth(pool, box), blobs)
+
+	// Jobs (River). Default role embeds the workers; --no-worker builds an
+	// insert-only client so transactional enqueue still works while a
+	// separate `slatedesk worker` process runs the jobs.
+	var registry *jobs.Registry
+	if !*noWorker {
+		registry = jobs.NewRegistry()
+		if err := registry.RegisterBuiltins(jobs.Deps{Pool: pool}); err != nil {
+			return err
+		}
+		if err := email.RegisterWorkers(registry, engine); err != nil {
+			return err
+		}
+	}
+	jc, err := jobs.NewClient(pool, registry)
+	if err != nil {
+		return err
+	}
+	engine.SetRiver(jc.River())
+	if !*noWorker {
+		// WithoutCancel: SIGTERM must trigger a graceful drain (Stop
+		// below), not an abrupt cancellation of in-flight jobs.
+		if err := jc.Start(context.WithoutCancel(ctx)); err != nil {
+			return err
+		}
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+		defer cancel()
+		if err := jc.Stop(stopCtx); err != nil {
+			slog.Warn("river client shutdown", "error", err)
+		}
+	}()
+
+	// Mailbox supervisors (goroutine-per-mailbox IMAP): run wherever the
+	// workers run — the default serve role has them; --no-worker leaves
+	// them to the dedicated worker process (its reconcile interval picks
+	// up mailbox mutations; the HTTP kicker below is then nil).
+	var supervisor *email.Supervisor
+	var supervisorDone chan struct{}
+	if !*noWorker {
+		supervisor = email.NewSupervisor(engine, email.SupervisorConfig{})
+		supervisorDone = make(chan struct{})
+		go func() {
+			defer close(supervisorDone)
+			_ = supervisor.Run(ctx)
+		}()
+	}
+	var kicker handlers.Kicker
+	if supervisor != nil {
+		kicker = supervisor // a nil *Supervisor must not become a non-nil Kicker
+	}
+
+	srv, err := httpserver.New(cfg.Addr, pool, secret, cfg.CookieSecure, hub, blobs, engine, kicker)
+	if err != nil {
+		return err
+	}
+	runErr := srv.Run(ctx)
+
+	// Graceful supervisor stop: Run(ctx) tears every mailbox runner down
+	// and releases its leases when ctx is canceled; wait (bounded) so the
+	// releases land before the deferred pool.Close.
+	if supervisorDone != nil {
+		select {
+		case <-supervisorDone:
+		case <-time.After(15 * time.Second):
+			slog.Warn("mailbox supervisor did not stop in time")
+		}
+	}
+	return runErr
+}
+
+// cmdWorker runs job workers without the HTTP server (`slatedesk worker`,
+// the dedicated worker Deployment in Tier 2/3 setups). Migrations apply
+// first, same as serve — the advisory lock makes concurrent starts safe.
+func cmdWorker(args []string) error {
+	fs := flag.NewFlagSet("worker", flag.ExitOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	ctx, stop := signalContext()
+	defer stop()
+
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	if err := migrate.Run(ctx, pool); err != nil {
+		return err
+	}
+
+	secret, err := settings.New(pool).EnsureInstanceSecret(ctx)
+	if err != nil {
+		return err
+	}
+	box, err := secrets.NewBox(secret, secrets.PurposeMailboxCredentials)
+	if err != nil {
+		return err
+	}
+	blobs, err := storage.NewLocal(storage.DataDirFromEnv())
+	if err != nil {
+		return err
+	}
+	engine := email.NewEngine(pool, email.NewAuth(pool, box), blobs)
+
+	registry := jobs.NewRegistry()
+	if err := registry.RegisterBuiltins(jobs.Deps{Pool: pool}); err != nil {
+		return err
+	}
+	if err := email.RegisterWorkers(registry, engine); err != nil {
+		return err
+	}
+	jc, err := jobs.NewClient(pool, registry)
+	if err != nil {
+		return err
+	}
+	engine.SetRiver(jc.River())
+	if err := jc.Start(context.WithoutCancel(ctx)); err != nil {
+		return err
+	}
+	slog.Info("worker running", "workers", registry.Len())
+
+	supervisor := email.NewSupervisor(engine, email.SupervisorConfig{})
+	supervisorDone := make(chan struct{})
+	go func() {
+		defer close(supervisorDone)
+		_ = supervisor.Run(ctx)
+	}()
+
+	<-ctx.Done()
+	slog.Info("worker shutting down")
+	// Wait (bounded) for the supervisor to tear down mailbox runners and
+	// release their leases before stopping River and closing the pool.
+	select {
+	case <-supervisorDone:
+	case <-time.After(15 * time.Second):
+		slog.Warn("mailbox supervisor did not stop in time")
+	}
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+	defer cancel()
+	if err := jc.Stop(stopCtx); err != nil {
+		return fmt.Errorf("worker shutdown: %w", err)
+	}
+	return nil
 }
 
 func cmdMigrate(args []string) error {

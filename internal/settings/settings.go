@@ -25,6 +25,12 @@ import (
 // instance root secret (cookie signing; later: mailbox credential key derivation).
 const KeyInstanceSecret = "instance_secret"
 
+// KeyExternalURL is the settings key holding the instance's public base URL
+// (JSON string, e.g. "https://desk.example.com", no trailing slash; absent
+// until configured). It builds the Google OAuth redirect_uri and, later,
+// links in outbound email.
+const KeyExternalURL = "external_url"
+
 // instanceSecretLen is the secret size in bytes.
 const instanceSecretLen = 32
 

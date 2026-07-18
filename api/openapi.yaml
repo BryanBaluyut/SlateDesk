@@ -5,7 +5,11 @@ info:
     SlateDesk v2 HTTP API. Milestone 1 surface: local authentication
     (signed HttpOnly session cookie), users, and teams. Milestone 2 adds
     the ticket core: tickets, articles, attachments, tags, dashboard
-    counters, and the realtime event stream.
+    counters, and the realtime event stream. Milestone 3 adds the email
+    channel's admin surface: mailbox configuration with live fetch/send
+    tests and the Google OAuth connect flow, the instance external-URL
+    setting, and outbound delivery status on articles with a retry
+    operation.
 
     All errors are RFC 9457 problem details (`application/problem+json`).
 
@@ -17,7 +21,14 @@ info:
     workspace needs them for assignee pickers, team routing, and
     requester lookups; all user/team mutations remain admin only. Each
     operation's description states its required role.
-  version: 0.2.0
+
+    Access model (M3): everything under `/mailboxes` and `/settings` is
+    **admin only** (including the Google OAuth callback, which arrives as
+    a top-level browser navigation carrying the admin's session cookie).
+    `POST /articles/{id}/retry-send` is agent or admin, like the rest of
+    the ticket core. Mailbox responses **never** contain credentials:
+    passwords, client secrets, and OAuth tokens are write-only inputs.
+  version: 0.3.0
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -52,6 +63,14 @@ tags:
     description: Workspace counters.
   - name: events
     description: Realtime Server-Sent Events stream.
+  - name: mailboxes
+    description: |
+      Email channel configuration and health (M3). **Admin only.**
+      Responses carry connection config and health but **never**
+      credentials — passwords, client secrets, and OAuth tokens are
+      write-only.
+  - name: settings
+    description: Instance settings. **Admin only.**
 
 paths:
   /auth/login:
@@ -768,6 +787,47 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /articles/{id}/retry-send:
+    post:
+      operationId: retryArticleSend
+      summary: Retry a failed outbound email delivery
+      description: |
+        Re-enqueues the email delivery of an outbound article whose
+        `delivery_status` is `failed` (the terminal badge after the send
+        job exhausted its retries). The article flips back to `queued`
+        (emitting an `article.updated` stream event) and the send is
+        retried with the **same** Message-ID that was committed before
+        the first attempt, so a duplicate delivery can never fork the
+        email thread. Only `failed` articles can be retried — anything
+        else answers 409, with one recovery exception: an article stuck
+        on `sending` whose send job no longer exists (the worker crashed
+        on its final attempt) is also accepted; a send genuinely in
+        flight still answers 409. Requires agent or admin role.
+      tags: [articles]
+      parameters:
+        - $ref: "#/components/parameters/ArticleID"
+      responses:
+        "202":
+          description: Delivery re-enqueued; the article is `queued` again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Article"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The article's delivery status is not `failed`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
   /attachments/{id}:
     get:
       operationId: downloadAttachment
@@ -949,9 +1009,11 @@ paths:
         workspace cache invalidation. Each event is one `data:` frame
         whose payload is a JSON `StreamEvent` (`{type, ticket_id}`); no
         SSE `event:` or `id:` fields are used. Event types:
-        `ticket.created`, `ticket.updated`, `article.created`, plus
-        `resync` (no `ticket_id`) when the server may have dropped events
-        (e.g. it re-established its own database LISTEN connection) — on
+        `ticket.created`, `ticket.updated`, `article.created`,
+        `article.updated` (an existing article changed — in M3 that is
+        an email `delivery_status` transition), plus `resync` (no
+        `ticket_id`) when the server may have dropped events (e.g. it
+        re-established its own database LISTEN connection) — on
         `resync` a client must refetch everything it displays.
 
         Events are invalidation hints, not a durable feed: a client that
@@ -983,6 +1045,385 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /mailboxes:
+    get:
+      operationId: listMailboxes
+      summary: List mailboxes
+      description: |
+        All configured mailboxes with their connection config and health
+        columns (`last_poll_at`, `last_error`, `last_error_at`) feeding
+        the admin screen's health pills. Credentials are never included.
+        **Admin only.**
+      tags: [mailboxes]
+      responses:
+        "200":
+          description: All mailboxes, sorted by name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Mailbox"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createMailbox
+      summary: Create a mailbox
+      description: |
+        Creates a mailbox. The request is discriminated on `auth_kind`;
+        each kind carries its own write-only credential fields:
+
+          - `basic` — `password` (IMAP/SMTP login password)
+          - `oauth_m365` — `tenant_id`, `client_id`, `client_secret`
+            (Entra app registration; client-credentials XOAUTH2)
+          - `oauth_google` — `client_id`, `client_secret` (Google Cloud
+            OAuth client; the offline refresh token is obtained
+            afterwards via `POST /mailboxes/{id}/oauth/google/start`)
+
+        Secrets are encrypted at rest and **never** returned by any
+        response. New mailboxes default to `active=true`; the poller
+        adopts an active mailbox within one lease interval. **Admin
+        only.**
+      tags: [mailboxes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMailboxRequest"
+      responses:
+        "201":
+          description: Mailbox created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mailbox"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: A mailbox with this email address already exists.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /mailboxes/{id}:
+    parameters:
+      - $ref: "#/components/parameters/MailboxID"
+    get:
+      operationId: getMailbox
+      summary: Get a mailbox
+      description: |
+        Connection config and health; never credentials. **Admin only.**
+      tags: [mailboxes]
+      responses:
+        "200":
+          description: The mailbox.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mailbox"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+    patch:
+      operationId: updateMailbox
+      summary: Update a mailbox
+      description: |
+        Partial update; omitted fields are left unchanged. The write-only
+        credential fields rotate the stored secrets: `password` (basic),
+        `tenant_id`/`client_id`/`client_secret` (OAuth kinds). Rotating a
+        credential drops any cached OAuth access token; rotating an
+        `oauth_google` client additionally invalidates the stored refresh
+        token, so the Google connect flow must be run again. Changing
+        `auth_kind` requires supplying the credential fields the new kind
+        needs (400 otherwise). The response never echoes secrets. **Admin
+        only.**
+      tags: [mailboxes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMailboxRequest"
+      responses:
+        "200":
+          description: The updated mailbox (credentials never included).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mailbox"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A mailbox with this email address already exists.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteMailbox
+      summary: Delete a mailbox
+      description: |
+        Hard delete: the poller drops the mailbox and its lease. Email
+        threading state survives (recorded Message-IDs keep their
+        tickets; only their mailbox link is cleared), so replies to mail
+        sent through the deleted mailbox still thread correctly if
+        another mailbox receives them. **Admin only.**
+      tags: [mailboxes]
+      responses:
+        "204":
+          description: Mailbox deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /mailboxes/{id}/test-fetch:
+    post:
+      operationId: testMailboxFetch
+      summary: Test the mailbox's IMAP connection
+      description: |
+        Performs a live IMAP dial + authentication + SELECT INBOX with
+        the stored credentials and reports the outcome. A failed test is
+        a **200 with `ok=false`** — the test ran; its result is the
+        payload. Non-2xx responses mean the test could not be attempted
+        at all. May take several seconds (network timeouts). **Admin
+        only.**
+      tags: [mailboxes]
+      parameters:
+        - $ref: "#/components/parameters/MailboxID"
+      responses:
+        "200":
+          description: Test outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailboxTestResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /mailboxes/{id}/test-send:
+    post:
+      operationId: testMailboxSend
+      summary: Send a test email through the mailbox
+      description: |
+        Performs a live SMTP dial + authentication and sends a short
+        test message to `to` from the mailbox's address. A failed send
+        is a **200 with `ok=false`**; non-2xx means the test could not
+        be attempted. The test mail carries auto-generated headers
+        (`Auto-Submitted`, `X-Auto-Response-Suppress`) so it can never
+        start an autoresponder loop, and it is not recorded on any
+        ticket. **Admin only.**
+      tags: [mailboxes]
+      parameters:
+        - $ref: "#/components/parameters/MailboxID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MailboxTestSendRequest"
+      responses:
+        "200":
+          description: Test outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MailboxTestResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /mailboxes/{id}/oauth/google/start:
+    post:
+      operationId: startMailboxGoogleOauth
+      summary: Start the Google OAuth connect flow
+      description: |
+        Builds the Google authorization URL for an `oauth_google`
+        mailbox (authorization-code flow with offline access, so the
+        exchange yields a refresh token) and returns it for the browser
+        to navigate to. The `redirect_uri` is derived from the instance
+        external URL setting
+        (`{external_url}/api/v1/mailboxes/oauth/google/callback`) and
+        must be registered on the Google OAuth client. The signed,
+        single-use `state` parameter binds the callback to this mailbox
+        and session. 409 when the mailbox is not `oauth_google` or the
+        external URL setting is unset. **Admin only.**
+      tags: [mailboxes]
+      parameters:
+        - $ref: "#/components/parameters/MailboxID"
+      responses:
+        "200":
+          description: The authorization URL to send the admin's browser to.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleOauthStart"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            The mailbox's `auth_kind` is not `oauth_google`, or the
+            instance external URL setting is not configured (PUT
+            /settings/external-url first).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /mailboxes/oauth/google/callback:
+    get:
+      operationId: mailboxGoogleOauthCallback
+      summary: Google OAuth redirect target
+      description: |
+        Browser redirect target of the Google connect flow — not called
+        by API clients. Validates `state` (signed, single-use, bound to
+        the mailbox and the initiating admin session), exchanges `code`
+        for tokens, persists the refresh token into the mailbox's
+        encrypted credentials, and redirects to
+        `/settings/mailboxes?connected=1`. Because this is a top-level
+        navigation, the admin's SameSite=Lax session cookie is sent —
+        the endpoint is as **admin only** as the rest of the mailbox
+        surface. A missing/invalid `state`, a provider `error`, or a
+        failed code exchange is a 400 problem; nothing is persisted.
+      tags: [mailboxes]
+      parameters:
+        - name: state
+          in: query
+          required: true
+          description: Signed single-use state minted by the start operation.
+          schema:
+            type: string
+        - name: code
+          in: query
+          description: Authorization code (present on provider success).
+          schema:
+            type: string
+        - name: error
+          in: query
+          description: Provider error code (e.g. `access_denied`), if any.
+          schema:
+            type: string
+      responses:
+        "303":
+          description: |
+            Refresh token stored; browser sent to
+            `/settings/mailboxes?connected=1`.
+          headers:
+            Location:
+              description: "`/settings/mailboxes?connected=1`"
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /settings/external-url:
+    get:
+      operationId: getExternalUrl
+      summary: Get the instance external URL
+      description: |
+        The public base URL this instance is reached at (used to build
+        the Google OAuth `redirect_uri`; later, links in outbound
+        email). `external_url` is `""` until configured. **Admin only.**
+      tags: [settings]
+      responses:
+        "200":
+          description: The current setting.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalUrlSetting"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+    put:
+      operationId: setExternalUrl
+      summary: Set the instance external URL
+      description: |
+        Sets the public base URL: an absolute `http`/`https` URL with no
+        path, query, or fragment (e.g. `https://desk.example.com`); a
+        trailing slash is stripped. Idempotent PUT. **Admin only.**
+      tags: [settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetExternalUrlRequest"
+      responses:
+        "200":
+          description: The stored (normalized) setting.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalUrlSetting"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         default:
           $ref: "#/components/responses/Problem"
 
@@ -1043,6 +1484,14 @@ components:
       in: path
       required: true
       description: Tag id.
+      schema:
+        type: string
+        format: uuid
+    MailboxID:
+      name: id
+      in: path
+      required: true
+      description: Mailbox id.
       schema:
         type: string
         format: uuid
@@ -1391,7 +1840,9 @@ components:
       description: |
         One message in a ticket's thread. `body_html`, when present, was
         sanitized (bluemonday) at write time and is safe to render;
-        `body_text` always exists and feeds search.
+        `body_text` always exists and feeds search. `delivery_status` is
+        the outbound email badge (null on articles that are not outbound
+        email).
       required:
         - id
         - ticket_id
@@ -1401,6 +1852,7 @@ components:
         - is_internal
         - body_text
         - body_html
+        - delivery_status
         - attachments
         - created_at
       properties:
@@ -1427,6 +1879,14 @@ components:
         body_html:
           type: ["string", "null"]
           description: Sanitized HTML body; null when the article is plain text.
+        delivery_status:
+          description: |
+            Outbound email delivery badge; null on articles that are not
+            outbound email (inbound mail, internal notes, web/api
+            articles on tickets without an email origin).
+          anyOf:
+            - $ref: "#/components/schemas/DeliveryStatus"
+            - type: "null"
         attachments:
           type: array
           description: Files attached to this article.
@@ -1435,6 +1895,30 @@ components:
         created_at:
           type: string
           format: date-time
+
+    DeliveryStatus:
+      type: string
+      description: |
+        Outbound email delivery state of an article. Transitions:
+
+          - `queued` — the article and its send job committed in one
+            transaction; the job has not started yet.
+          - `queued → sending` — the send worker committed the outbound
+            Message-ID (threading is safe from here on) and is dialing
+            SMTP. On worker crash the job retries from here with the
+            same Message-ID.
+          - `sending → sent` — the SMTP server accepted the message.
+            Terminal.
+          - `sending → failed` — every retry (capped backoff) failed.
+            Terminal, shown as a visible badge; `POST
+            /articles/{id}/retry-send` moves it back to `queued`.
+          - `sending → queued` — recovery only: a worker crash on the
+            final attempt can strand the badge on `sending` (the job is
+            discarded without running); retry-send accepts that stuck
+            state once no live send job remains.
+
+        Every transition emits an `article.updated` stream event.
+      enum: [queued, sending, sent, failed]
 
     Attachment:
       type: object
@@ -1543,7 +2027,12 @@ components:
       properties:
         type:
           type: string
-          enum: [ticket.created, ticket.updated, article.created, resync]
+          enum:
+            - ticket.created
+            - ticket.updated
+            - article.created
+            - article.updated
+            - resync
         ticket_id:
           type: string
           format: uuid
@@ -1643,3 +2132,422 @@ components:
           minLength: 1
         color:
           type: ["string", "null"]
+
+    MailboxAuthKind:
+      type: string
+      description: |
+        How the mailbox authenticates to its IMAP/SMTP servers: `basic`
+        (username + password), `oauth_m365` (Entra client-credentials
+        XOAUTH2), `oauth_google` (Google authorization-code XOAUTH2 with
+        an offline refresh token).
+      enum: [basic, oauth_m365, oauth_google]
+
+    MailTLSMode:
+      type: string
+      description: |
+        TLS posture of a mail connection: `tls` (implicit TLS),
+        `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+        local dev/test servers only; never use in production).
+      enum: [tls, starttls, none]
+
+    Mailbox:
+      type: object
+      description: |
+        A configured email mailbox: connection config plus the health
+        columns behind the admin screen's health pills. Credentials
+        (password, client secret, OAuth tokens) are **never** included
+        in any response.
+      required:
+        - id
+        - name
+        - email_address
+        - active
+        - auth_kind
+        - imap_host
+        - imap_port
+        - imap_tls_mode
+        - imap_username
+        - smtp_host
+        - smtp_port
+        - smtp_tls_mode
+        - smtp_username
+        - oauth_tenant_id
+        - oauth_client_id
+        - from_display_name
+        - signature
+        - auto_ack_enabled
+        - last_poll_at
+        - last_error
+        - last_error_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Display name of the mailbox (e.g. "Support").
+        email_address:
+          type: string
+          format: email
+          description: The address this mailbox sends and receives as. Unique.
+        active:
+          type: boolean
+          description: Inactive mailboxes are neither polled nor sent through.
+        auth_kind:
+          $ref: "#/components/schemas/MailboxAuthKind"
+        imap_host:
+          type: string
+        imap_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        imap_tls_mode:
+          $ref: "#/components/schemas/MailTLSMode"
+        imap_username:
+          type: string
+        smtp_host:
+          type: string
+        smtp_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        smtp_tls_mode:
+          $ref: "#/components/schemas/MailTLSMode"
+        smtp_username:
+          type: string
+        oauth_tenant_id:
+          type: ["string", "null"]
+          description: Entra tenant id; null unless auth_kind is oauth_m365.
+        oauth_client_id:
+          type: ["string", "null"]
+          description: OAuth client id; null for basic-auth mailboxes.
+        from_display_name:
+          type: string
+          description: From header display name ('' = use the mailbox name).
+        signature:
+          type: string
+          description: Appended to outbound mail ('' = none).
+        auto_ack_enabled:
+          type: boolean
+          description: Send the loop-guarded auto-acknowledgement for new tickets.
+        last_poll_at:
+          type: ["string", "null"]
+          format: date-time
+          description: |
+            Last successful poll; null before the first success. Stays at
+            the last success while errors occur, so "last worked at" is
+            visible next to the error.
+        last_error:
+          type: ["string", "null"]
+          description: Most recent poll/send error; null when healthy.
+        last_error_at:
+          type: ["string", "null"]
+          format: date-time
+          description: When last_error occurred; null when healthy.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    MailboxConfig:
+      type: object
+      description: |
+        Writable connection/config fields shared by every mailbox create
+        variant (credential fields live on the variants).
+      required:
+        - name
+        - email_address
+        - imap_host
+        - imap_port
+        - imap_username
+        - smtp_host
+        - smtp_port
+        - smtp_username
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email_address:
+          type: string
+          format: email
+        active:
+          type: boolean
+          default: true
+        imap_host:
+          type: string
+          minLength: 1
+        imap_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        imap_tls_mode:
+          $ref: "#/components/schemas/MailTLSMode"
+          default: tls
+        imap_username:
+          type: string
+          minLength: 1
+        smtp_host:
+          type: string
+          minLength: 1
+        smtp_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        smtp_tls_mode:
+          $ref: "#/components/schemas/MailTLSMode"
+          default: starttls
+        smtp_username:
+          type: string
+          minLength: 1
+        from_display_name:
+          type: string
+          description: Defaults to '' (the mailbox name is used).
+        signature:
+          type: string
+          description: Defaults to ''.
+        auto_ack_enabled:
+          type: boolean
+          default: true
+
+    CreateMailboxBasicRequest:
+      description: Password-authenticated IMAP/SMTP mailbox.
+      allOf:
+        - $ref: "#/components/schemas/MailboxConfig"
+        - type: object
+          required: [auth_kind, password]
+          properties:
+            auth_kind:
+              type: string
+              enum: [basic]
+            password:
+              type: string
+              minLength: 1
+              writeOnly: true
+              description: |
+                IMAP/SMTP login password. Write-only: encrypted at rest,
+                never returned by any response.
+
+    CreateMailboxOauthM365Request:
+      description: |
+        Microsoft 365 mailbox (Entra app registration, client-credentials
+        XOAUTH2). Per-mailbox access is restricted Entra-side via
+        application access policies.
+      allOf:
+        - $ref: "#/components/schemas/MailboxConfig"
+        - type: object
+          required: [auth_kind, tenant_id, client_id, client_secret]
+          properties:
+            auth_kind:
+              type: string
+              enum: [oauth_m365]
+            tenant_id:
+              type: string
+              minLength: 1
+              writeOnly: true
+              description: |
+                Entra tenant id. Write-only here; echoed back (not
+                secret) as `oauth_tenant_id`.
+            client_id:
+              type: string
+              minLength: 1
+              writeOnly: true
+              description: |
+                App registration client id. Write-only here; echoed back
+                (not secret) as `oauth_client_id`.
+            client_secret:
+              type: string
+              minLength: 1
+              writeOnly: true
+              description: |
+                App registration client secret. Write-only: encrypted at
+                rest, never returned by any response.
+
+    CreateMailboxOauthGoogleRequest:
+      description: |
+        Google Workspace/Gmail mailbox (authorization-code XOAUTH2). The
+        offline refresh token is NOT part of this request — after
+        creating the mailbox, run `POST
+        /mailboxes/{id}/oauth/google/start` and complete the browser
+        consent flow; the callback stores the refresh token.
+      allOf:
+        - $ref: "#/components/schemas/MailboxConfig"
+        - type: object
+          required: [auth_kind, client_id, client_secret]
+          properties:
+            auth_kind:
+              type: string
+              enum: [oauth_google]
+            client_id:
+              type: string
+              minLength: 1
+              writeOnly: true
+              description: |
+                Google OAuth client id. Write-only here; echoed back (not
+                secret) as `oauth_client_id`.
+            client_secret:
+              type: string
+              minLength: 1
+              writeOnly: true
+              description: |
+                Google OAuth client secret. Write-only: encrypted at
+                rest, never returned by any response.
+
+    CreateMailboxRequest:
+      description: |
+        Mailbox creation payload, discriminated on `auth_kind`; each
+        kind carries its own write-only credential fields.
+      oneOf:
+        - $ref: "#/components/schemas/CreateMailboxBasicRequest"
+        - $ref: "#/components/schemas/CreateMailboxOauthM365Request"
+        - $ref: "#/components/schemas/CreateMailboxOauthGoogleRequest"
+      discriminator:
+        propertyName: auth_kind
+        mapping:
+          basic: "#/components/schemas/CreateMailboxBasicRequest"
+          oauth_m365: "#/components/schemas/CreateMailboxOauthM365Request"
+          oauth_google: "#/components/schemas/CreateMailboxOauthGoogleRequest"
+
+    UpdateMailboxRequest:
+      type: object
+      description: |
+        Partial update; omitted fields are left unchanged. The write-only
+        credential fields rotate stored secrets and are never echoed:
+        `password` applies to `basic`; `tenant_id`, `client_id`,
+        `client_secret` apply to the OAuth kinds. When `auth_kind`
+        changes, the credential fields required by the new kind must be
+        supplied in the same request (400 otherwise).
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email_address:
+          type: string
+          format: email
+        active:
+          type: boolean
+        auth_kind:
+          $ref: "#/components/schemas/MailboxAuthKind"
+        imap_host:
+          type: string
+          minLength: 1
+        imap_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        imap_tls_mode:
+          $ref: "#/components/schemas/MailTLSMode"
+        imap_username:
+          type: string
+          minLength: 1
+        smtp_host:
+          type: string
+          minLength: 1
+        smtp_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        smtp_tls_mode:
+          $ref: "#/components/schemas/MailTLSMode"
+        smtp_username:
+          type: string
+          minLength: 1
+        from_display_name:
+          type: string
+        signature:
+          type: string
+        auto_ack_enabled:
+          type: boolean
+        password:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: New password (basic auth). Never echoed.
+        tenant_id:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: New Entra tenant id (oauth_m365).
+        client_id:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: New OAuth client id (oauth_m365 / oauth_google).
+        client_secret:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: |
+            New OAuth client secret (oauth_m365 / oauth_google). Never
+            echoed. Rotating an oauth_google client invalidates the
+            stored refresh token — re-run the Google connect flow.
+
+    MailboxTestResult:
+      type: object
+      description: |
+        Outcome of a live mailbox connectivity test. `ok=false` still
+        arrives as HTTP 200 — the test ran; this object is its result.
+      required: [ok, detail, latency_ms]
+      properties:
+        ok:
+          type: boolean
+        detail:
+          type: string
+          description: |
+            Human-readable outcome — the failing step and error on
+            failure (e.g. "IMAP AUTHENTICATE: invalid credentials"), a
+            short success summary otherwise.
+        latency_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Wall-clock duration of the whole test.
+
+    MailboxTestSendRequest:
+      type: object
+      required: [to]
+      properties:
+        to:
+          type: string
+          format: email
+          description: Recipient of the test message.
+
+    GoogleOauthStart:
+      type: object
+      description: Where to send the admin's browser to grant consent.
+      required: [authorization_url]
+      properties:
+        authorization_url:
+          type: string
+          format: uri
+          description: |
+            Google authorization URL (authorization-code flow with
+            `access_type=offline`, signed single-use `state`).
+
+    ExternalUrlSetting:
+      type: object
+      description: The instance's public base URL setting.
+      required: [external_url]
+      properties:
+        external_url:
+          type: string
+          description: |
+            Absolute http(s) base URL the instance is reached at, no
+            trailing slash (e.g. "https://desk.example.com"); '' until
+            configured.
+
+    SetExternalUrlRequest:
+      type: object
+      required: [external_url]
+      properties:
+        external_url:
+          type: string
+          format: uri
+          minLength: 1
+          pattern: "^https?://"
+          description: |
+            Absolute http(s) base URL with no path, query, or fragment;
+            a trailing slash is stripped before storage.

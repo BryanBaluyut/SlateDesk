@@ -328,6 +328,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/articles/{id}/retry-send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed outbound email delivery
+         * @description Re-enqueues the email delivery of an outbound article whose
+         *     `delivery_status` is `failed` (the terminal badge after the send
+         *     job exhausted its retries). The article flips back to `queued`
+         *     (emitting an `article.updated` stream event) and the send is
+         *     retried with the **same** Message-ID that was committed before
+         *     the first attempt, so a duplicate delivery can never fork the
+         *     email thread. Only `failed` articles can be retried — anything
+         *     else answers 409, with one recovery exception: an article stuck
+         *     on `sending` whose send job no longer exists (the worker crashed
+         *     on its final attempt) is also accepted; a send genuinely in
+         *     flight still answers 409. Requires agent or admin role.
+         */
+        post: operations["retryArticleSend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/{id}": {
         parameters: {
             query?: never;
@@ -441,9 +471,11 @@ export interface paths {
          *     workspace cache invalidation. Each event is one `data:` frame
          *     whose payload is a JSON `StreamEvent` (`{type, ticket_id}`); no
          *     SSE `event:` or `id:` fields are used. Event types:
-         *     `ticket.created`, `ticket.updated`, `article.created`, plus
-         *     `resync` (no `ticket_id`) when the server may have dropped events
-         *     (e.g. it re-established its own database LISTEN connection) — on
+         *     `ticket.created`, `ticket.updated`, `article.created`,
+         *     `article.updated` (an existing article changed — in M3 that is
+         *     an email `delivery_status` transition), plus `resync` (no
+         *     `ticket_id`) when the server may have dropped events (e.g. it
+         *     re-established its own database LISTEN connection) — on
          *     `resync` a client must refetch everything it displays.
          *
          *     Events are invalidation hints, not a durable feed: a client that
@@ -454,6 +486,226 @@ export interface paths {
          */
         get: operations["streamEvents"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mailboxes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List mailboxes
+         * @description All configured mailboxes with their connection config and health
+         *     columns (`last_poll_at`, `last_error`, `last_error_at`) feeding
+         *     the admin screen's health pills. Credentials are never included.
+         *     **Admin only.**
+         */
+        get: operations["listMailboxes"];
+        put?: never;
+        /**
+         * Create a mailbox
+         * @description Creates a mailbox. The request is discriminated on `auth_kind`;
+         *     each kind carries its own write-only credential fields:
+         *
+         *       - `basic` — `password` (IMAP/SMTP login password)
+         *       - `oauth_m365` — `tenant_id`, `client_id`, `client_secret`
+         *         (Entra app registration; client-credentials XOAUTH2)
+         *       - `oauth_google` — `client_id`, `client_secret` (Google Cloud
+         *         OAuth client; the offline refresh token is obtained
+         *         afterwards via `POST /mailboxes/{id}/oauth/google/start`)
+         *
+         *     Secrets are encrypted at rest and **never** returned by any
+         *     response. New mailboxes default to `active=true`; the poller
+         *     adopts an active mailbox within one lease interval. **Admin
+         *     only.**
+         */
+        post: operations["createMailbox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mailboxes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mailbox id. */
+                id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a mailbox
+         * @description Connection config and health; never credentials. **Admin only.**
+         */
+        get: operations["getMailbox"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a mailbox
+         * @description Hard delete: the poller drops the mailbox and its lease. Email
+         *     threading state survives (recorded Message-IDs keep their
+         *     tickets; only their mailbox link is cleared), so replies to mail
+         *     sent through the deleted mailbox still thread correctly if
+         *     another mailbox receives them. **Admin only.**
+         */
+        delete: operations["deleteMailbox"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a mailbox
+         * @description Partial update; omitted fields are left unchanged. The write-only
+         *     credential fields rotate the stored secrets: `password` (basic),
+         *     `tenant_id`/`client_id`/`client_secret` (OAuth kinds). Rotating a
+         *     credential drops any cached OAuth access token; rotating an
+         *     `oauth_google` client additionally invalidates the stored refresh
+         *     token, so the Google connect flow must be run again. Changing
+         *     `auth_kind` requires supplying the credential fields the new kind
+         *     needs (400 otherwise). The response never echoes secrets. **Admin
+         *     only.**
+         */
+        patch: operations["updateMailbox"];
+        trace?: never;
+    };
+    "/mailboxes/{id}/test-fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test the mailbox's IMAP connection
+         * @description Performs a live IMAP dial + authentication + SELECT INBOX with
+         *     the stored credentials and reports the outcome. A failed test is
+         *     a **200 with `ok=false`** — the test ran; its result is the
+         *     payload. Non-2xx responses mean the test could not be attempted
+         *     at all. May take several seconds (network timeouts). **Admin
+         *     only.**
+         */
+        post: operations["testMailboxFetch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mailboxes/{id}/test-send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test email through the mailbox
+         * @description Performs a live SMTP dial + authentication and sends a short
+         *     test message to `to` from the mailbox's address. A failed send
+         *     is a **200 with `ok=false`**; non-2xx means the test could not
+         *     be attempted. The test mail carries auto-generated headers
+         *     (`Auto-Submitted`, `X-Auto-Response-Suppress`) so it can never
+         *     start an autoresponder loop, and it is not recorded on any
+         *     ticket. **Admin only.**
+         */
+        post: operations["testMailboxSend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mailboxes/{id}/oauth/google/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start the Google OAuth connect flow
+         * @description Builds the Google authorization URL for an `oauth_google`
+         *     mailbox (authorization-code flow with offline access, so the
+         *     exchange yields a refresh token) and returns it for the browser
+         *     to navigate to. The `redirect_uri` is derived from the instance
+         *     external URL setting
+         *     (`{external_url}/api/v1/mailboxes/oauth/google/callback`) and
+         *     must be registered on the Google OAuth client. The signed,
+         *     single-use `state` parameter binds the callback to this mailbox
+         *     and session. 409 when the mailbox is not `oauth_google` or the
+         *     external URL setting is unset. **Admin only.**
+         */
+        post: operations["startMailboxGoogleOauth"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mailboxes/oauth/google/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Google OAuth redirect target
+         * @description Browser redirect target of the Google connect flow — not called
+         *     by API clients. Validates `state` (signed, single-use, bound to
+         *     the mailbox and the initiating admin session), exchanges `code`
+         *     for tokens, persists the refresh token into the mailbox's
+         *     encrypted credentials, and redirects to
+         *     `/settings/mailboxes?connected=1`. Because this is a top-level
+         *     navigation, the admin's SameSite=Lax session cookie is sent —
+         *     the endpoint is as **admin only** as the rest of the mailbox
+         *     surface. A missing/invalid `state`, a provider `error`, or a
+         *     failed code exchange is a 400 problem; nothing is persisted.
+         */
+        get: operations["mailboxGoogleOauthCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/external-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the instance external URL
+         * @description The public base URL this instance is reached at (used to build
+         *     the Google OAuth `redirect_uri`; later, links in outbound
+         *     email). `external_url` is `""` until configured. **Admin only.**
+         */
+        get: operations["getExternalUrl"];
+        /**
+         * Set the instance external URL
+         * @description Sets the public base URL: an absolute `http`/`https` URL with no
+         *     path, query, or fragment (e.g. `https://desk.example.com`); a
+         *     trailing slash is stripped. Idempotent PUT. **Admin only.**
+         */
+        put: operations["setExternalUrl"];
         post?: never;
         delete?: never;
         options?: never;
@@ -650,7 +902,9 @@ export interface components {
         /**
          * @description One message in a ticket's thread. `body_html`, when present, was
          *     sanitized (bluemonday) at write time and is safe to render;
-         *     `body_text` always exists and feeds search.
+         *     `body_text` always exists and feeds search. `delivery_status` is
+         *     the outbound email badge (null on articles that are not outbound
+         *     email).
          */
         Article: {
             /** Format: uuid */
@@ -666,11 +920,40 @@ export interface components {
             body_text: string;
             /** @description Sanitized HTML body; null when the article is plain text. */
             body_html: string | null;
+            /**
+             * @description Outbound email delivery badge; null on articles that are not
+             *     outbound email (inbound mail, internal notes, web/api
+             *     articles on tickets without an email origin).
+             */
+            delivery_status: components["schemas"]["DeliveryStatus"] | null;
             /** @description Files attached to this article. */
             attachments: components["schemas"]["Attachment"][];
             /** Format: date-time */
             created_at: string;
         };
+        /**
+         * @description Outbound email delivery state of an article. Transitions:
+         *
+         *       - `queued` — the article and its send job committed in one
+         *         transaction; the job has not started yet.
+         *       - `queued → sending` — the send worker committed the outbound
+         *         Message-ID (threading is safe from here on) and is dialing
+         *         SMTP. On worker crash the job retries from here with the
+         *         same Message-ID.
+         *       - `sending → sent` — the SMTP server accepted the message.
+         *         Terminal.
+         *       - `sending → failed` — every retry (capped backoff) failed.
+         *         Terminal, shown as a visible badge; `POST
+         *         /articles/{id}/retry-send` moves it back to `queued`.
+         *       - `sending → queued` — recovery only: a worker crash on the
+         *         final attempt can strand the badge on `sending` (the job is
+         *         discarded without running); retry-send accepts that stuck
+         *         state once no live send job remains.
+         *
+         *     Every transition emits an `article.updated` stream event.
+         * @enum {string}
+         */
+        DeliveryStatus: "queued" | "sending" | "sent" | "failed";
         /** @description Attachment metadata; the bytes live at GET /attachments/{id}. */
         Attachment: {
             /** Format: uuid */
@@ -753,7 +1036,7 @@ export interface components {
          */
         StreamEvent: {
             /** @enum {string} */
-            type: "ticket.created" | "ticket.updated" | "article.created" | "resync";
+            type: "ticket.created" | "ticket.updated" | "article.created" | "article.updated" | "resync";
             /** Format: uuid */
             ticket_id?: string;
         };
@@ -819,6 +1102,271 @@ export interface components {
         UpdateTagRequest: {
             name?: string;
             color?: string | null;
+        };
+        /**
+         * @description How the mailbox authenticates to its IMAP/SMTP servers: `basic`
+         *     (username + password), `oauth_m365` (Entra client-credentials
+         *     XOAUTH2), `oauth_google` (Google authorization-code XOAUTH2 with
+         *     an offline refresh token).
+         * @enum {string}
+         */
+        MailboxAuthKind: "basic" | "oauth_m365" | "oauth_google";
+        /**
+         * @description TLS posture of a mail connection: `tls` (implicit TLS),
+         *     `starttls` (mandatory STARTTLS upgrade), `none` (cleartext —
+         *     local dev/test servers only; never use in production).
+         * @enum {string}
+         */
+        MailTLSMode: "tls" | "starttls" | "none";
+        /**
+         * @description A configured email mailbox: connection config plus the health
+         *     columns behind the admin screen's health pills. Credentials
+         *     (password, client secret, OAuth tokens) are **never** included
+         *     in any response.
+         */
+        Mailbox: {
+            /** Format: uuid */
+            id: string;
+            /** @description Display name of the mailbox (e.g. "Support"). */
+            name: string;
+            /**
+             * Format: email
+             * @description The address this mailbox sends and receives as. Unique.
+             */
+            email_address: string;
+            /** @description Inactive mailboxes are neither polled nor sent through. */
+            active: boolean;
+            auth_kind: components["schemas"]["MailboxAuthKind"];
+            imap_host: string;
+            imap_port: number;
+            imap_tls_mode: components["schemas"]["MailTLSMode"];
+            imap_username: string;
+            smtp_host: string;
+            smtp_port: number;
+            smtp_tls_mode: components["schemas"]["MailTLSMode"];
+            smtp_username: string;
+            /** @description Entra tenant id; null unless auth_kind is oauth_m365. */
+            oauth_tenant_id: string | null;
+            /** @description OAuth client id; null for basic-auth mailboxes. */
+            oauth_client_id: string | null;
+            /** @description From header display name ('' = use the mailbox name). */
+            from_display_name: string;
+            /** @description Appended to outbound mail ('' = none). */
+            signature: string;
+            /** @description Send the loop-guarded auto-acknowledgement for new tickets. */
+            auto_ack_enabled: boolean;
+            /**
+             * Format: date-time
+             * @description Last successful poll; null before the first success. Stays at
+             *     the last success while errors occur, so "last worked at" is
+             *     visible next to the error.
+             */
+            last_poll_at: string | null;
+            /** @description Most recent poll/send error; null when healthy. */
+            last_error: string | null;
+            /**
+             * Format: date-time
+             * @description When last_error occurred; null when healthy.
+             */
+            last_error_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /**
+         * @description Writable connection/config fields shared by every mailbox create
+         *     variant (credential fields live on the variants).
+         */
+        MailboxConfig: {
+            name: string;
+            /** Format: email */
+            email_address: string;
+            /** @default true */
+            active: boolean;
+            imap_host: string;
+            imap_port: number;
+            /** @default tls */
+            imap_tls_mode: components["schemas"]["MailTLSMode"];
+            imap_username: string;
+            smtp_host: string;
+            smtp_port: number;
+            /** @default starttls */
+            smtp_tls_mode: components["schemas"]["MailTLSMode"];
+            smtp_username: string;
+            /** @description Defaults to '' (the mailbox name is used). */
+            from_display_name?: string;
+            /** @description Defaults to ''. */
+            signature?: string;
+            /** @default true */
+            auto_ack_enabled: boolean;
+        };
+        /** @description Password-authenticated IMAP/SMTP mailbox. */
+        CreateMailboxBasicRequest: components["schemas"]["MailboxConfig"] & {
+            /** @enum {string} */
+            auth_kind: "basic";
+            /**
+             * @description IMAP/SMTP login password. Write-only: encrypted at rest,
+             *     never returned by any response.
+             */
+            password: string;
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            auth_kind: "basic";
+        };
+        /**
+         * @description Microsoft 365 mailbox (Entra app registration, client-credentials
+         *     XOAUTH2). Per-mailbox access is restricted Entra-side via
+         *     application access policies.
+         */
+        CreateMailboxOauthM365Request: components["schemas"]["MailboxConfig"] & {
+            /** @enum {string} */
+            auth_kind: "oauth_m365";
+            /**
+             * @description Entra tenant id. Write-only here; echoed back (not
+             *     secret) as `oauth_tenant_id`.
+             */
+            tenant_id: string;
+            /**
+             * @description App registration client id. Write-only here; echoed back
+             *     (not secret) as `oauth_client_id`.
+             */
+            client_id: string;
+            /**
+             * @description App registration client secret. Write-only: encrypted at
+             *     rest, never returned by any response.
+             */
+            client_secret: string;
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            auth_kind: "oauth_m365";
+        };
+        /**
+         * @description Google Workspace/Gmail mailbox (authorization-code XOAUTH2). The
+         *     offline refresh token is NOT part of this request — after
+         *     creating the mailbox, run `POST
+         *     /mailboxes/{id}/oauth/google/start` and complete the browser
+         *     consent flow; the callback stores the refresh token.
+         */
+        CreateMailboxOauthGoogleRequest: components["schemas"]["MailboxConfig"] & {
+            /** @enum {string} */
+            auth_kind: "oauth_google";
+            /**
+             * @description Google OAuth client id. Write-only here; echoed back (not
+             *     secret) as `oauth_client_id`.
+             */
+            client_id: string;
+            /**
+             * @description Google OAuth client secret. Write-only: encrypted at
+             *     rest, never returned by any response.
+             */
+            client_secret: string;
+        } & {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            auth_kind: "oauth_google";
+        };
+        /**
+         * @description Mailbox creation payload, discriminated on `auth_kind`; each
+         *     kind carries its own write-only credential fields.
+         */
+        CreateMailboxRequest: components["schemas"]["CreateMailboxBasicRequest"] | components["schemas"]["CreateMailboxOauthM365Request"] | components["schemas"]["CreateMailboxOauthGoogleRequest"];
+        /**
+         * @description Partial update; omitted fields are left unchanged. The write-only
+         *     credential fields rotate stored secrets and are never echoed:
+         *     `password` applies to `basic`; `tenant_id`, `client_id`,
+         *     `client_secret` apply to the OAuth kinds. When `auth_kind`
+         *     changes, the credential fields required by the new kind must be
+         *     supplied in the same request (400 otherwise).
+         */
+        UpdateMailboxRequest: {
+            name?: string;
+            /** Format: email */
+            email_address?: string;
+            active?: boolean;
+            auth_kind?: components["schemas"]["MailboxAuthKind"];
+            imap_host?: string;
+            imap_port?: number;
+            imap_tls_mode?: components["schemas"]["MailTLSMode"];
+            imap_username?: string;
+            smtp_host?: string;
+            smtp_port?: number;
+            smtp_tls_mode?: components["schemas"]["MailTLSMode"];
+            smtp_username?: string;
+            from_display_name?: string;
+            signature?: string;
+            auto_ack_enabled?: boolean;
+            /** @description New password (basic auth). Never echoed. */
+            password?: string;
+            /** @description New Entra tenant id (oauth_m365). */
+            tenant_id?: string;
+            /** @description New OAuth client id (oauth_m365 / oauth_google). */
+            client_id?: string;
+            /**
+             * @description New OAuth client secret (oauth_m365 / oauth_google). Never
+             *     echoed. Rotating an oauth_google client invalidates the
+             *     stored refresh token — re-run the Google connect flow.
+             */
+            client_secret?: string;
+        };
+        /**
+         * @description Outcome of a live mailbox connectivity test. `ok=false` still
+         *     arrives as HTTP 200 — the test ran; this object is its result.
+         */
+        MailboxTestResult: {
+            ok: boolean;
+            /**
+             * @description Human-readable outcome — the failing step and error on
+             *     failure (e.g. "IMAP AUTHENTICATE: invalid credentials"), a
+             *     short success summary otherwise.
+             */
+            detail: string;
+            /**
+             * Format: int64
+             * @description Wall-clock duration of the whole test.
+             */
+            latency_ms: number;
+        };
+        MailboxTestSendRequest: {
+            /**
+             * Format: email
+             * @description Recipient of the test message.
+             */
+            to: string;
+        };
+        /** @description Where to send the admin's browser to grant consent. */
+        GoogleOauthStart: {
+            /**
+             * Format: uri
+             * @description Google authorization URL (authorization-code flow with
+             *     `access_type=offline`, signed single-use `state`).
+             */
+            authorization_url: string;
+        };
+        /** @description The instance's public base URL setting. */
+        ExternalUrlSetting: {
+            /**
+             * @description Absolute http(s) base URL the instance is reached at, no
+             *     trailing slash (e.g. "https://desk.example.com"); '' until
+             *     configured.
+             */
+            external_url: string;
+        };
+        SetExternalUrlRequest: {
+            /**
+             * Format: uri
+             * @description Absolute http(s) base URL with no path, query, or fragment;
+             *     a trailing slash is stripped before storage.
+             */
+            external_url: string;
         };
     };
     responses: {
@@ -890,6 +1438,8 @@ export interface components {
         AttachmentID: string;
         /** @description Tag id. */
         TagID: string;
+        /** @description Mailbox id. */
+        MailboxID: string;
     };
     requestBodies: never;
     headers: never;
@@ -1569,6 +2119,42 @@ export interface operations {
             default: components["responses"]["Problem"];
         };
     };
+    retryArticleSend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Article id. */
+                id: components["parameters"]["ArticleID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Delivery re-enqueued; the article is `queued` again. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Article"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The article's delivery status is not `failed`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
     downloadAttachment: {
         parameters: {
             query?: never;
@@ -1784,6 +2370,344 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listMailboxes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All mailboxes, sorted by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mailbox"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    createMailbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMailboxRequest"];
+            };
+        };
+        responses: {
+            /** @description Mailbox created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mailbox"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description A mailbox with this email address already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    getMailbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mailbox id. */
+                id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The mailbox. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mailbox"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteMailbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mailbox id. */
+                id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Mailbox deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateMailbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mailbox id. */
+                id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMailboxRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated mailbox (credentials never included). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Mailbox"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description A mailbox with this email address already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    testMailboxFetch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mailbox id. */
+                id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Test outcome. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxTestResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    testMailboxSend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mailbox id. */
+                id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailboxTestSendRequest"];
+            };
+        };
+        responses: {
+            /** @description Test outcome. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxTestResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    startMailboxGoogleOauth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Mailbox id. */
+                id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The authorization URL to send the admin's browser to. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleOauthStart"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /**
+             * @description The mailbox's `auth_kind` is not `oauth_google`, or the
+             *     instance external URL setting is not configured (PUT
+             *     /settings/external-url first).
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    mailboxGoogleOauthCallback: {
+        parameters: {
+            query: {
+                /** @description Signed single-use state minted by the start operation. */
+                state: string;
+                /** @description Authorization code (present on provider success). */
+                code?: string;
+                /** @description Provider error code (e.g. `access_denied`), if any. */
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /**
+             * @description Refresh token stored; browser sent to
+             *     `/settings/mailboxes?connected=1`.
+             */
+            303: {
+                headers: {
+                    /** @description `/settings/mailboxes?connected=1` */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getExternalUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The current setting. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalUrlSetting"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    setExternalUrl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetExternalUrlRequest"];
+            };
+        };
+        responses: {
+            /** @description The stored (normalized) setting. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalUrlSetting"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             default: components["responses"]["Problem"];
         };
     };

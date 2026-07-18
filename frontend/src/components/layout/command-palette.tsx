@@ -12,7 +12,7 @@ import {
   TICKET_PRIORITIES,
   TICKET_STATUSES,
 } from "@/api/types";
-import { NAV_ITEMS } from "@/components/layout/nav";
+import { navItemsFor } from "@/components/layout/nav";
 import { PriorityIcon, StatusBadge } from "@/components/tickets/badges";
 import { NewTicketDialog } from "@/components/tickets/new-ticket-dialog";
 import { useTheme } from "@/components/theme";
@@ -148,7 +148,7 @@ export function CommandPalette({
           )}
 
           <CommandGroup heading="Go to">
-            {NAV_ITEMS.map((item) => (
+            {navItemsFor(meQuery.data?.role).map((item) => (
               <CommandItem
                 key={item.to}
                 onSelect={() => run(() => void navigate({ to: item.to }))}

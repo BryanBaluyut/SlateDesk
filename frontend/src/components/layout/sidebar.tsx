@@ -2,7 +2,8 @@ import { Link } from "@tanstack/react-router";
 import { PanelLeft } from "lucide-react";
 import { useState } from "react";
 
-import { NAV_ITEMS } from "@/components/layout/nav";
+import type { Role } from "@/api/types";
+import { navItemsFor } from "@/components/layout/nav";
 import { cn } from "@/lib/utils";
 
 const COLLAPSE_KEY = "slatedesk-sidebar-collapsed";
@@ -11,7 +12,7 @@ const COLLAPSE_KEY = "slatedesk-sidebar-collapsed";
  * Left navigation rail. Collapsible to an icon rail; the choice persists.
  * Every link keeps a visible keyboard-focus ring.
  */
-export function Sidebar() {
+export function Sidebar({ role }: { role: Role }) {
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === "1",
   );
@@ -50,7 +51,7 @@ export function Sidebar() {
         aria-label="Main"
         className={cn("flex flex-1 flex-col gap-0.5 py-2", collapsed ? "px-2" : "px-2")}
       >
-        {NAV_ITEMS.map((item) => (
+        {navItemsFor(role).map((item) => (
           <Link
             key={item.to}
             to={item.to}

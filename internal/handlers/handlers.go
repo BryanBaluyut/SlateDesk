@@ -22,12 +22,23 @@ import (
 
 	"github.com/BryanBaluyut/slatedesk/internal/api"
 	"github.com/BryanBaluyut/slatedesk/internal/auth"
+	"github.com/BryanBaluyut/slatedesk/internal/email"
 	"github.com/BryanBaluyut/slatedesk/internal/events"
 	"github.com/BryanBaluyut/slatedesk/internal/problem"
+	"github.com/BryanBaluyut/slatedesk/internal/secrets"
+	"github.com/BryanBaluyut/slatedesk/internal/settings"
 	"github.com/BryanBaluyut/slatedesk/internal/storage"
 	"github.com/BryanBaluyut/slatedesk/internal/store"
 	"github.com/BryanBaluyut/slatedesk/internal/ticket"
 )
+
+// Kicker pokes the in-process mailbox supervisor for an immediate
+// reconcile after a mailbox mutation (create/update/delete). Satisfied by
+// *email.Supervisor; nil when the supervisor runs in another process
+// (`serve --no-worker`), where the reconcile interval picks changes up.
+type Kicker interface {
+	Kick()
+}
 
 // Login rate limits. Per IP+email: loginBurst immediate attempts, then one
 // more every loginRefill — the anti-guessing brake for a single account.
@@ -51,11 +62,17 @@ type Handlers struct {
 	hub          *events.Hub       // in-process SSE fan-out
 	sseSlots     chan struct{}     // bounds concurrent SSE streams (see events.go)
 	blobs        storage.Storage   // attachment blob storage
-	secret       []byte            // instance secret; signs session cookies
+	secret       []byte            // instance secret; signs session cookies + OAuth state
 	limiter      *auth.RateLimiter // per IP+email
 	ipLimiter    *auth.RateLimiter // per IP, all emails combined
 	sessionTTL   time.Duration
 	cookieSecure auth.CookieSecureMode
+
+	// M3 email surface.
+	engine   *email.Engine   // test connections, Google OAuth, retry-send
+	box      *secrets.Box    // mailbox credential encryption at write
+	settings *settings.Store // external-url + OAuth state nonces
+	kicker   Kicker          // supervisor poke on mailbox mutations (nil-able)
 }
 
 var _ api.ServerInterface = (*Handlers)(nil)
@@ -63,12 +80,23 @@ var _ api.ServerInterface = (*Handlers)(nil)
 // New returns Handlers backed by pool, signing sessions with the instance
 // secret. cookieSecure controls the session cookie's Secure attribute; hub
 // feeds GET /events subscribers (fill it from an events.Listener); blobs
-// stores attachment bytes.
-func New(pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode, hub *events.Hub, blobs storage.Storage) *Handlers {
+// stores attachment bytes. engine is the M3 email engine: it doubles as
+// the ticket service's Mailer (agent replies enqueue their email
+// atomically) and backs the mailbox admin surface; kicker (nil-able)
+// pokes the in-process mailbox supervisor after mailbox mutations.
+func New(pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode, hub *events.Hub, blobs storage.Storage, engine *email.Engine, kicker Kicker) (*Handlers, error) {
+	box, err := secrets.NewBox(secret, secrets.PurposeMailboxCredentials)
+	if err != nil {
+		return nil, fmt.Errorf("handlers: mailbox credentials box: %w", err)
+	}
+	svc := ticket.NewService(pool)
+	if engine != nil {
+		svc.SetMailer(engine)
+	}
 	return &Handlers{
 		pool:         pool,
 		q:            store.New(pool),
-		svc:          ticket.NewService(pool),
+		svc:          svc,
 		hub:          hub,
 		sseSlots:     make(chan struct{}, maxEventStreams),
 		blobs:        blobs,
@@ -77,6 +105,18 @@ func New(pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode, 
 		ipLimiter:    auth.NewRateLimiter(loginIPBurst, loginIPRefill),
 		sessionTTL:   auth.DefaultSessionTTL,
 		cookieSecure: cookieSecure,
+		engine:       engine,
+		box:          box,
+		settings:     settings.New(pool),
+		kicker:       kicker,
+	}, nil
+}
+
+// kickMailboxes pokes the in-process supervisor (if any) so a mailbox
+// mutation takes effect without waiting out the reconcile interval.
+func (h *Handlers) kickMailboxes() {
+	if h.kicker != nil {
+		h.kicker.Kick()
 	}
 }
 

@@ -19,8 +19,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/BryanBaluyut/slatedesk/internal/auth"
+	"github.com/BryanBaluyut/slatedesk/internal/email"
 	"github.com/BryanBaluyut/slatedesk/internal/events"
 	"github.com/BryanBaluyut/slatedesk/internal/handlers"
+	"github.com/BryanBaluyut/slatedesk/internal/jobs"
+	"github.com/BryanBaluyut/slatedesk/internal/secrets"
 	"github.com/BryanBaluyut/slatedesk/internal/storage"
 	"github.com/BryanBaluyut/slatedesk/internal/store"
 	"github.com/BryanBaluyut/slatedesk/internal/ticket"
@@ -36,10 +39,16 @@ func uniqueName(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, uniqueCounter.Add(1))
 }
 
+// fakeKicker counts supervisor pokes from mailbox mutations.
+type fakeKicker struct{ kicks atomic.Int64 }
+
+func (k *fakeKicker) Kick() { k.kicks.Add(1) }
+
 // env is one isolated handler stack: its own instance secret (so cookies
 // from other envs never verify), its own SSE hub fed by a dedicated
-// LISTEN connection, and its own temp-dir blob storage — mounted at
-// /api/v1 like production.
+// LISTEN connection, its own temp-dir blob storage, and its own email
+// engine with an insert-only River client (transactional enqueue works;
+// no workers run) — mounted at /api/v1 like production.
 type env struct {
 	t      *testing.T
 	srv    *httptest.Server
@@ -47,6 +56,9 @@ type env struct {
 	svc    *ticket.Service
 	hub    *events.Hub
 	secret []byte
+	engine *email.Engine
+	box    *secrets.Box
+	kicker *fakeKicker
 }
 
 func newEnv(t *testing.T) *env {
@@ -66,9 +78,27 @@ func newEnv(t *testing.T) *env {
 		t.Fatalf("create blob storage: %v", err)
 	}
 
+	// Same box derivation as handlers.New, so tests can decrypt what the
+	// handlers stored.
+	box, err := secrets.NewBox(secret, secrets.PurposeMailboxCredentials)
+	if err != nil {
+		t.Fatalf("create secrets box: %v", err)
+	}
+	engine := email.NewEngine(testPool, email.NewAuth(testPool, box), blobs)
+	jc, err := jobs.NewClient(testPool, nil) // insert-only, like serve --no-worker
+	if err != nil {
+		t.Fatalf("create jobs client: %v", err)
+	}
+	engine.SetRiver(jc.River())
+	kicker := &fakeKicker{}
+
+	h, err := handlers.New(testPool, secret, auth.CookieSecureAuto, hub, blobs, engine, kicker)
+	if err != nil {
+		t.Fatalf("build handlers: %v", err)
+	}
 	r := chi.NewRouter()
 	r.Route("/api", func(api chi.Router) {
-		api.Mount("/v1", handlers.New(testPool, secret, auth.CookieSecureAuto, hub, blobs).Router())
+		api.Mount("/v1", h.Router())
 	})
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
@@ -79,6 +109,9 @@ func newEnv(t *testing.T) *env {
 		svc:    ticket.NewService(testPool),
 		hub:    hub,
 		secret: secret,
+		engine: engine,
+		box:    box,
+		kicker: kicker,
 	}
 }
 

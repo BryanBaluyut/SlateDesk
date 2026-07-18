@@ -5,6 +5,8 @@
 // run is serialized across replicas with a session-level Postgres advisory
 // lock, so N app nodes can start simultaneously and exactly one applies each
 // pending migration (architecture doc §5/§6: migrations self-apply on start).
+// River's queue-table migrations run inside the same locked critical section
+// (see jobs.Migrate), so one migrate step produces the complete schema.
 package migrate
 
 import (
@@ -17,6 +19,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/BryanBaluyut/slatedesk/internal/jobs"
 )
 
 //go:embed sql/*.sql
@@ -85,6 +89,14 @@ func Run(ctx context.Context, pool *pgxpool.Pool) error {
 			return err
 		}
 		slog.Info("applied migration", "version", name)
+	}
+
+	// River's own migrations (river_job etc.) are part of our migrate step:
+	// still inside the advisory-lock critical section, so exactly one
+	// replica applies them. They use pool connections, not the lock-holding
+	// conn — fine, the lock serializes callers of Run, not connections.
+	if err := jobs.Migrate(ctx, pool); err != nil {
+		return err
 	}
 	return nil
 }

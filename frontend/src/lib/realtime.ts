@@ -18,7 +18,9 @@ function isStreamEvent(value: unknown): value is StreamEvent {
   return (
     (v.type === "ticket.created" ||
       v.type === "ticket.updated" ||
-      v.type === "article.created") &&
+      v.type === "article.created" ||
+      // M3: delivery_status transitions on outbound email articles.
+      v.type === "article.updated") &&
     typeof v.ticket_id === "string"
   );
 }

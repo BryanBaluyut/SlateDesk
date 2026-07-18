@@ -53,6 +53,18 @@ SET active     = true,
     updated_at = now()
 WHERE id = $1;
 
+-- name: EnsureUserByEmail :one
+-- M3 inbound email: look up the sender by address (citext, so case folds),
+-- creating a CUSTOMER on first contact. The conflict arm is a deliberate
+-- no-op self-assignment: an existing user is returned unchanged — in
+-- particular their role — so an unknown sender can NEVER be auto-created
+-- as (or promoted to) agent/admin via email (architecture doc §4).
+INSERT INTO users (email, name, role)
+VALUES ($1, $2, 'customer')
+ON CONFLICT (email) DO UPDATE
+SET email = users.email
+RETURNING *;
+
 -- name: BumpUserTokenVersion :one
 UPDATE users
 SET token_version = token_version + 1,
