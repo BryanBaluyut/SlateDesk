@@ -20,6 +20,8 @@ export const Route = createFileRoute("/_auth/settings")({
 const SECTIONS = [
   { to: "/settings", label: "General", exact: true },
   { to: "/settings/mailboxes", label: "Mailboxes", exact: false },
+  { to: "/settings/api-keys", label: "API keys", exact: false },
+  { to: "/settings/webhooks", label: "Webhooks", exact: false },
 ] as const;
 
 function SettingsLayout() {

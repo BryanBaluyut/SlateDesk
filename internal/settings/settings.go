@@ -31,6 +31,20 @@ const KeyInstanceSecret = "instance_secret"
 // links in outbound email.
 const KeyExternalURL = "external_url"
 
+// Setup-wizard state keys (M4 first-run installer). All live as plain rows in
+// the settings table so setup progress survives restarts and is shared across
+// replicas — not process memory (architecture doc §5).
+const (
+	// KeySetupCompleted holds a JSON bool: true once the first-run wizard has
+	// finished (or a headless admin was created). Absent/false means the
+	// installer flow is still open.
+	KeySetupCompleted = "setup_completed"
+
+	// KeyInstanceName holds a JSON string: the operator-chosen display name
+	// for this help desk (branding). Absent until the wizard sets it.
+	KeyInstanceName = "instance_name"
+)
+
 // instanceSecretLen is the secret size in bytes.
 const instanceSecretLen = 32
 
@@ -81,6 +95,65 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("settings: delete %q: %w", key, err)
 	}
 	return nil
+}
+
+// --- Setup-wizard accessors (M4) ---------------------------------------------
+//
+// These are thin typed wrappers over Get/Set. A missing key is not an error:
+// the setup flow starts with an empty settings table, so absent reads return
+// the zero value (setup not completed, empty name/URL).
+
+// SetupCompleted reports whether first-run setup has finished. It returns
+// false (not an error) when the key has never been set.
+func (s *Store) SetupCompleted(ctx context.Context) (bool, error) {
+	var done bool
+	if err := s.Get(ctx, KeySetupCompleted, &done); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return done, nil
+}
+
+// SetSetupCompleted records whether first-run setup has finished. Setting it
+// true is what closes the installer flow (the wizard is idempotent, so
+// re-running SetSetupCompleted(true) is harmless).
+func (s *Store) SetSetupCompleted(ctx context.Context, done bool) error {
+	return s.Set(ctx, KeySetupCompleted, done)
+}
+
+// InstanceName returns the configured instance display name, or "" if unset.
+func (s *Store) InstanceName(ctx context.Context) (string, error) {
+	return s.getStringOrEmpty(ctx, KeyInstanceName)
+}
+
+// SetInstanceName stores the instance display name.
+func (s *Store) SetInstanceName(ctx context.Context, name string) error {
+	return s.Set(ctx, KeyInstanceName, name)
+}
+
+// ExternalURL returns the configured public base URL, or "" if unset.
+func (s *Store) ExternalURL(ctx context.Context) (string, error) {
+	return s.getStringOrEmpty(ctx, KeyExternalURL)
+}
+
+// SetExternalURL stores the public base URL. Callers are responsible for
+// normalizing/validating the value (see handlers.normalizeExternalURL).
+func (s *Store) SetExternalURL(ctx context.Context, url string) error {
+	return s.Set(ctx, KeyExternalURL, url)
+}
+
+// getStringOrEmpty reads a JSON-string setting, treating an absent key as "".
+func (s *Store) getStringOrEmpty(ctx context.Context, key string) (string, error) {
+	var v string
+	if err := s.Get(ctx, key, &v); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	return v, nil
 }
 
 // EnsureInstanceSecret returns the instance root secret, generating and

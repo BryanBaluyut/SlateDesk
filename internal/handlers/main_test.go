@@ -17,6 +17,7 @@ import (
 	"github.com/BryanBaluyut/slatedesk/internal/auth"
 	"github.com/BryanBaluyut/slatedesk/internal/db"
 	"github.com/BryanBaluyut/slatedesk/internal/migrate"
+	"github.com/BryanBaluyut/slatedesk/internal/settings"
 )
 
 // Tests run against a real Postgres (DATABASE_URL, falling back to the dev
@@ -106,6 +107,15 @@ func run(m *testing.M) int {
 
 	if err := migrate.Run(ctx, testPool); err != nil {
 		log.Printf("handlers test: migrate: %v", err)
+		return 1
+	}
+
+	// M4 setup-incomplete gate: mark first-run setup complete for the shared
+	// test database so the standard handler tests exercise the live API rather
+	// than the 503 installer gate. The dedicated setup tests provision their
+	// own fresh databases to exercise the incomplete state.
+	if err := settings.New(testPool).SetSetupCompleted(ctx, true); err != nil {
+		log.Printf("handlers test: mark setup complete: %v", err)
 		return 1
 	}
 

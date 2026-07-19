@@ -34,6 +34,12 @@ const (
 	// PurposeMailboxCredentials protects the mailboxes.credentials_enc
 	// JSON blob (passwords, OAuth client secrets / refresh tokens).
 	PurposeMailboxCredentials = "mailbox-credentials"
+
+	// PurposeWebhookSecret protects a webhook endpoint's HMAC-SHA256 signing
+	// secret (webhooks.secret_enc). Each endpoint's secret is encrypted under
+	// this purpose's derived key so a leaked ciphertext cannot be opened as a
+	// mailbox credential and vice versa.
+	PurposeWebhookSecret = "webhook-secret"
 )
 
 // v1Prefix tags the current ciphertext format.

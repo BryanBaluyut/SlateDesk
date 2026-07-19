@@ -1,6 +1,7 @@
 import {
   Inbox,
   LayoutDashboard,
+  MessageSquareText,
   Settings,
   UsersRound,
   Users,
@@ -10,7 +11,13 @@ import type { Role } from "@/api/types";
 
 /** Shared navigation model for the sidebar and the command palette. */
 export interface NavItem {
-  to: "/tickets" | "/dashboard" | "/users" | "/teams" | "/settings";
+  to:
+    | "/tickets"
+    | "/dashboard"
+    | "/users"
+    | "/teams"
+    | "/canned-replies"
+    | "/settings";
   label: string;
   icon: typeof Inbox;
   /** Placeholder destination — the feature lands in a later milestone. */
@@ -24,6 +31,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/users", label: "Users", icon: Users },
   { to: "/teams", label: "Teams", icon: UsersRound },
+  {
+    to: "/canned-replies",
+    label: "Canned replies",
+    icon: MessageSquareText,
+  },
   { to: "/settings", label: "Settings", icon: Settings, adminOnly: true },
 ];
 

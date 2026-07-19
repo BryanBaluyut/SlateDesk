@@ -9,19 +9,43 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SubmitRouteImport } from './routes/submit'
+import { Route as SetupRouteImport } from './routes/setup'
+import { Route as PortalRouteImport } from './routes/portal'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthRouteImport } from './routes/_auth'
+import { Route as PortalIndexRouteImport } from './routes/portal.index'
 import { Route as AuthIndexRouteImport } from './routes/_auth.index'
+import { Route as PortalNewRouteImport } from './routes/portal.new'
 import { Route as AuthUsersRouteImport } from './routes/_auth.users'
 import { Route as AuthTicketsRouteImport } from './routes/_auth.tickets'
 import { Route as AuthTeamsRouteImport } from './routes/_auth.teams'
 import { Route as AuthSettingsRouteImport } from './routes/_auth.settings'
 import { Route as AuthDashboardRouteImport } from './routes/_auth.dashboard'
+import { Route as AuthCannedRepliesRouteImport } from './routes/_auth.canned-replies'
 import { Route as AuthTicketsIndexRouteImport } from './routes/_auth.tickets.index'
 import { Route as AuthSettingsIndexRouteImport } from './routes/_auth.settings.index'
+import { Route as PortalTicketsTicketIdRouteImport } from './routes/portal.tickets.$ticketId'
 import { Route as AuthTicketsTicketIdRouteImport } from './routes/_auth.tickets.$ticketId'
+import { Route as AuthSettingsWebhooksRouteImport } from './routes/_auth.settings.webhooks'
 import { Route as AuthSettingsMailboxesRouteImport } from './routes/_auth.settings.mailboxes'
+import { Route as AuthSettingsApiKeysRouteImport } from './routes/_auth.settings.api-keys'
 
+const SubmitRoute = SubmitRouteImport.update({
+  id: '/submit',
+  path: '/submit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortalRoute = PortalRouteImport.update({
+  id: '/portal',
+  path: '/portal',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -31,10 +55,20 @@ const AuthRoute = AuthRouteImport.update({
   id: '/_auth',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PortalIndexRoute = PortalIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PortalRoute,
+} as any)
 const AuthIndexRoute = AuthIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AuthRoute,
+} as any)
+const PortalNewRoute = PortalNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => PortalRoute,
 } as any)
 const AuthUsersRoute = AuthUsersRouteImport.update({
   id: '/users',
@@ -61,6 +95,11 @@ const AuthDashboardRoute = AuthDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthRoute,
 } as any)
+const AuthCannedRepliesRoute = AuthCannedRepliesRouteImport.update({
+  id: '/canned-replies',
+  path: '/canned-replies',
+  getParentRoute: () => AuthRoute,
+} as any)
 const AuthTicketsIndexRoute = AuthTicketsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -71,38 +110,70 @@ const AuthSettingsIndexRoute = AuthSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthSettingsRoute,
 } as any)
+const PortalTicketsTicketIdRoute = PortalTicketsTicketIdRouteImport.update({
+  id: '/tickets/$ticketId',
+  path: '/tickets/$ticketId',
+  getParentRoute: () => PortalRoute,
+} as any)
 const AuthTicketsTicketIdRoute = AuthTicketsTicketIdRouteImport.update({
   id: '/$ticketId',
   path: '/$ticketId',
   getParentRoute: () => AuthTicketsRoute,
+} as any)
+const AuthSettingsWebhooksRoute = AuthSettingsWebhooksRouteImport.update({
+  id: '/webhooks',
+  path: '/webhooks',
+  getParentRoute: () => AuthSettingsRoute,
 } as any)
 const AuthSettingsMailboxesRoute = AuthSettingsMailboxesRouteImport.update({
   id: '/mailboxes',
   path: '/mailboxes',
   getParentRoute: () => AuthSettingsRoute,
 } as any)
+const AuthSettingsApiKeysRoute = AuthSettingsApiKeysRouteImport.update({
+  id: '/api-keys',
+  path: '/api-keys',
+  getParentRoute: () => AuthSettingsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthIndexRoute
   '/login': typeof LoginRoute
+  '/portal': typeof PortalRouteWithChildren
+  '/setup': typeof SetupRoute
+  '/submit': typeof SubmitRoute
+  '/canned-replies': typeof AuthCannedRepliesRoute
   '/dashboard': typeof AuthDashboardRoute
   '/settings': typeof AuthSettingsRouteWithChildren
   '/teams': typeof AuthTeamsRoute
   '/tickets': typeof AuthTicketsRouteWithChildren
   '/users': typeof AuthUsersRoute
+  '/portal/new': typeof PortalNewRoute
+  '/portal/': typeof PortalIndexRoute
+  '/settings/api-keys': typeof AuthSettingsApiKeysRoute
   '/settings/mailboxes': typeof AuthSettingsMailboxesRoute
+  '/settings/webhooks': typeof AuthSettingsWebhooksRoute
   '/tickets/$ticketId': typeof AuthTicketsTicketIdRoute
+  '/portal/tickets/$ticketId': typeof PortalTicketsTicketIdRoute
   '/settings/': typeof AuthSettingsIndexRoute
   '/tickets/': typeof AuthTicketsIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/setup': typeof SetupRoute
+  '/submit': typeof SubmitRoute
+  '/canned-replies': typeof AuthCannedRepliesRoute
   '/dashboard': typeof AuthDashboardRoute
   '/teams': typeof AuthTeamsRoute
   '/users': typeof AuthUsersRoute
+  '/portal/new': typeof PortalNewRoute
   '/': typeof AuthIndexRoute
+  '/portal': typeof PortalIndexRoute
+  '/settings/api-keys': typeof AuthSettingsApiKeysRoute
   '/settings/mailboxes': typeof AuthSettingsMailboxesRoute
+  '/settings/webhooks': typeof AuthSettingsWebhooksRoute
   '/tickets/$ticketId': typeof AuthTicketsTicketIdRoute
+  '/portal/tickets/$ticketId': typeof PortalTicketsTicketIdRoute
   '/settings': typeof AuthSettingsIndexRoute
   '/tickets': typeof AuthTicketsIndexRoute
 }
@@ -110,14 +181,23 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_auth': typeof AuthRouteWithChildren
   '/login': typeof LoginRoute
+  '/portal': typeof PortalRouteWithChildren
+  '/setup': typeof SetupRoute
+  '/submit': typeof SubmitRoute
+  '/_auth/canned-replies': typeof AuthCannedRepliesRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
   '/_auth/settings': typeof AuthSettingsRouteWithChildren
   '/_auth/teams': typeof AuthTeamsRoute
   '/_auth/tickets': typeof AuthTicketsRouteWithChildren
   '/_auth/users': typeof AuthUsersRoute
+  '/portal/new': typeof PortalNewRoute
   '/_auth/': typeof AuthIndexRoute
+  '/portal/': typeof PortalIndexRoute
+  '/_auth/settings/api-keys': typeof AuthSettingsApiKeysRoute
   '/_auth/settings/mailboxes': typeof AuthSettingsMailboxesRoute
+  '/_auth/settings/webhooks': typeof AuthSettingsWebhooksRoute
   '/_auth/tickets/$ticketId': typeof AuthTicketsTicketIdRoute
+  '/portal/tickets/$ticketId': typeof PortalTicketsTicketIdRoute
   '/_auth/settings/': typeof AuthSettingsIndexRoute
   '/_auth/tickets/': typeof AuthTicketsIndexRoute
 }
@@ -126,38 +206,64 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
+    | '/portal'
+    | '/setup'
+    | '/submit'
+    | '/canned-replies'
     | '/dashboard'
     | '/settings'
     | '/teams'
     | '/tickets'
     | '/users'
+    | '/portal/new'
+    | '/portal/'
+    | '/settings/api-keys'
     | '/settings/mailboxes'
+    | '/settings/webhooks'
     | '/tickets/$ticketId'
+    | '/portal/tickets/$ticketId'
     | '/settings/'
     | '/tickets/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/setup'
+    | '/submit'
+    | '/canned-replies'
     | '/dashboard'
     | '/teams'
     | '/users'
+    | '/portal/new'
     | '/'
+    | '/portal'
+    | '/settings/api-keys'
     | '/settings/mailboxes'
+    | '/settings/webhooks'
     | '/tickets/$ticketId'
+    | '/portal/tickets/$ticketId'
     | '/settings'
     | '/tickets'
   id:
     | '__root__'
     | '/_auth'
     | '/login'
+    | '/portal'
+    | '/setup'
+    | '/submit'
+    | '/_auth/canned-replies'
     | '/_auth/dashboard'
     | '/_auth/settings'
     | '/_auth/teams'
     | '/_auth/tickets'
     | '/_auth/users'
+    | '/portal/new'
     | '/_auth/'
+    | '/portal/'
+    | '/_auth/settings/api-keys'
     | '/_auth/settings/mailboxes'
+    | '/_auth/settings/webhooks'
     | '/_auth/tickets/$ticketId'
+    | '/portal/tickets/$ticketId'
     | '/_auth/settings/'
     | '/_auth/tickets/'
   fileRoutesById: FileRoutesById
@@ -165,10 +271,34 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   AuthRoute: typeof AuthRouteWithChildren
   LoginRoute: typeof LoginRoute
+  PortalRoute: typeof PortalRouteWithChildren
+  SetupRoute: typeof SetupRoute
+  SubmitRoute: typeof SubmitRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/submit': {
+      id: '/submit'
+      path: '/submit'
+      fullPath: '/submit'
+      preLoaderRoute: typeof SubmitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/portal': {
+      id: '/portal'
+      path: '/portal'
+      fullPath: '/portal'
+      preLoaderRoute: typeof PortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -183,12 +313,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/portal/': {
+      id: '/portal/'
+      path: '/'
+      fullPath: '/portal/'
+      preLoaderRoute: typeof PortalIndexRouteImport
+      parentRoute: typeof PortalRoute
+    }
     '/_auth/': {
       id: '/_auth/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AuthIndexRouteImport
       parentRoute: typeof AuthRoute
+    }
+    '/portal/new': {
+      id: '/portal/new'
+      path: '/new'
+      fullPath: '/portal/new'
+      preLoaderRoute: typeof PortalNewRouteImport
+      parentRoute: typeof PortalRoute
     }
     '/_auth/users': {
       id: '/_auth/users'
@@ -225,6 +369,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthDashboardRouteImport
       parentRoute: typeof AuthRoute
     }
+    '/_auth/canned-replies': {
+      id: '/_auth/canned-replies'
+      path: '/canned-replies'
+      fullPath: '/canned-replies'
+      preLoaderRoute: typeof AuthCannedRepliesRouteImport
+      parentRoute: typeof AuthRoute
+    }
     '/_auth/tickets/': {
       id: '/_auth/tickets/'
       path: '/'
@@ -239,12 +390,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthSettingsIndexRouteImport
       parentRoute: typeof AuthSettingsRoute
     }
+    '/portal/tickets/$ticketId': {
+      id: '/portal/tickets/$ticketId'
+      path: '/tickets/$ticketId'
+      fullPath: '/portal/tickets/$ticketId'
+      preLoaderRoute: typeof PortalTicketsTicketIdRouteImport
+      parentRoute: typeof PortalRoute
+    }
     '/_auth/tickets/$ticketId': {
       id: '/_auth/tickets/$ticketId'
       path: '/$ticketId'
       fullPath: '/tickets/$ticketId'
       preLoaderRoute: typeof AuthTicketsTicketIdRouteImport
       parentRoute: typeof AuthTicketsRoute
+    }
+    '/_auth/settings/webhooks': {
+      id: '/_auth/settings/webhooks'
+      path: '/webhooks'
+      fullPath: '/settings/webhooks'
+      preLoaderRoute: typeof AuthSettingsWebhooksRouteImport
+      parentRoute: typeof AuthSettingsRoute
     }
     '/_auth/settings/mailboxes': {
       id: '/_auth/settings/mailboxes'
@@ -253,16 +418,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthSettingsMailboxesRouteImport
       parentRoute: typeof AuthSettingsRoute
     }
+    '/_auth/settings/api-keys': {
+      id: '/_auth/settings/api-keys'
+      path: '/api-keys'
+      fullPath: '/settings/api-keys'
+      preLoaderRoute: typeof AuthSettingsApiKeysRouteImport
+      parentRoute: typeof AuthSettingsRoute
+    }
   }
 }
 
 interface AuthSettingsRouteChildren {
+  AuthSettingsApiKeysRoute: typeof AuthSettingsApiKeysRoute
   AuthSettingsMailboxesRoute: typeof AuthSettingsMailboxesRoute
+  AuthSettingsWebhooksRoute: typeof AuthSettingsWebhooksRoute
   AuthSettingsIndexRoute: typeof AuthSettingsIndexRoute
 }
 
 const AuthSettingsRouteChildren: AuthSettingsRouteChildren = {
+  AuthSettingsApiKeysRoute: AuthSettingsApiKeysRoute,
   AuthSettingsMailboxesRoute: AuthSettingsMailboxesRoute,
+  AuthSettingsWebhooksRoute: AuthSettingsWebhooksRoute,
   AuthSettingsIndexRoute: AuthSettingsIndexRoute,
 }
 
@@ -285,6 +461,7 @@ const AuthTicketsRouteWithChildren = AuthTicketsRoute._addFileChildren(
 )
 
 interface AuthRouteChildren {
+  AuthCannedRepliesRoute: typeof AuthCannedRepliesRoute
   AuthDashboardRoute: typeof AuthDashboardRoute
   AuthSettingsRoute: typeof AuthSettingsRouteWithChildren
   AuthTeamsRoute: typeof AuthTeamsRoute
@@ -294,6 +471,7 @@ interface AuthRouteChildren {
 }
 
 const AuthRouteChildren: AuthRouteChildren = {
+  AuthCannedRepliesRoute: AuthCannedRepliesRoute,
   AuthDashboardRoute: AuthDashboardRoute,
   AuthSettingsRoute: AuthSettingsRouteWithChildren,
   AuthTeamsRoute: AuthTeamsRoute,
@@ -304,9 +482,27 @@ const AuthRouteChildren: AuthRouteChildren = {
 
 const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
 
+interface PortalRouteChildren {
+  PortalNewRoute: typeof PortalNewRoute
+  PortalIndexRoute: typeof PortalIndexRoute
+  PortalTicketsTicketIdRoute: typeof PortalTicketsTicketIdRoute
+}
+
+const PortalRouteChildren: PortalRouteChildren = {
+  PortalNewRoute: PortalNewRoute,
+  PortalIndexRoute: PortalIndexRoute,
+  PortalTicketsTicketIdRoute: PortalTicketsTicketIdRoute,
+}
+
+const PortalRouteWithChildren =
+  PortalRoute._addFileChildren(PortalRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRouteWithChildren,
   LoginRoute: LoginRoute,
+  PortalRoute: PortalRouteWithChildren,
+  SetupRoute: SetupRoute,
+  SubmitRoute: SubmitRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

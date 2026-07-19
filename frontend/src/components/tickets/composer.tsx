@@ -6,6 +6,7 @@ import { MAX_ATTACHMENT_BYTES, uploadAttachment } from "@/api/attachments";
 import { isApiError } from "@/api/client";
 import { useCreateArticle } from "@/api/tickets";
 import type { TicketDetail } from "@/api/types";
+import { CannedPicker } from "@/components/canned/canned-picker";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useShortcut } from "@/lib/shortcuts";
@@ -46,6 +47,25 @@ export function Composer({ ticket }: { ticket: TicketDetail }) {
 
   useShortcut("reply", useCallback(() => focusAs("reply"), [focusAs]));
   useShortcut("note", useCallback(() => focusAs("note"), [focusAs]));
+
+  // Insert text (a canned reply) at the caret, replacing any selection, then
+  // restore focus with the caret after the inserted text.
+  function insertAtCaret(text: string) {
+    const el = textareaRef.current;
+    if (!el) {
+      setBody((prev) => prev + text);
+      return;
+    }
+    const start = el.selectionStart ?? body.length;
+    const end = el.selectionEnd ?? body.length;
+    const next = body.slice(0, start) + text + body.slice(end);
+    setBody(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const caret = start + text.length;
+      el.setSelectionRange(caret, caret);
+    });
+  }
 
   function addFiles(list: FileList | null) {
     if (!list) return;
@@ -274,17 +294,24 @@ export function Composer({ ticket }: { ticket: TicketDetail }) {
               e.target.value = "";
             }}
           />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Attach files"
-            title="Attach files"
-            disabled={sending}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Paperclip aria-hidden="true" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Attach files"
+              title="Attach files"
+              disabled={sending}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip aria-hidden="true" />
+            </Button>
+            <CannedPicker
+              ticket={ticket}
+              onInsert={insertAtCaret}
+              disabled={sending}
+            />
+          </div>
 
           <div className="flex items-center gap-2.5">
             <span className="hidden text-[11px] text-muted-foreground sm:block">

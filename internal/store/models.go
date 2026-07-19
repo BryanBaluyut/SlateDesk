@@ -358,6 +358,61 @@ func (ns NullUserRole) Value() (driver.Value, error) {
 	return string(ns.UserRole), nil
 }
 
+type WebhookDeliveryStatus string
+
+const (
+	WebhookDeliveryStatusPending WebhookDeliveryStatus = "pending"
+	WebhookDeliveryStatusSuccess WebhookDeliveryStatus = "success"
+	WebhookDeliveryStatusFailed  WebhookDeliveryStatus = "failed"
+)
+
+func (e *WebhookDeliveryStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = WebhookDeliveryStatus(s)
+	case string:
+		*e = WebhookDeliveryStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for WebhookDeliveryStatus: %T", src)
+	}
+	return nil
+}
+
+type NullWebhookDeliveryStatus struct {
+	WebhookDeliveryStatus WebhookDeliveryStatus `json:"webhook_delivery_status"`
+	Valid                 bool                  `json:"valid"` // Valid is true if WebhookDeliveryStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullWebhookDeliveryStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.WebhookDeliveryStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.WebhookDeliveryStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullWebhookDeliveryStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.WebhookDeliveryStatus), nil
+}
+
+type ApiKey struct {
+	ID         uuid.UUID          `json:"id"`
+	Name       string             `json:"name"`
+	KeyPrefix  string             `json:"key_prefix"`
+	KeyHash    string             `json:"key_hash"`
+	Scopes     []string           `json:"scopes"`
+	CreatedBy  uuid.UUID          `json:"created_by"`
+	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
+	CreatedAt  time.Time          `json:"created_at"`
+	RevokedAt  pgtype.Timestamptz `json:"revoked_at"`
+}
+
 type Article struct {
 	ID               uuid.UUID      `json:"id"`
 	TicketID         uuid.UUID      `json:"ticket_id"`
@@ -383,6 +438,15 @@ type ArticleAttachment struct {
 	SizeBytes   int64     `json:"size_bytes"`
 	StorageKey  string    `json:"storage_key"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+type CannedReply struct {
+	ID        uuid.UUID `json:"id"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	CreatedBy uuid.UUID `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type EmailMessageID struct {
@@ -496,4 +560,29 @@ type User struct {
 	Active       bool        `json:"active"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
+}
+
+type Webhook struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	Url       string    `json:"url"`
+	SecretEnc string    `json:"secret_enc"`
+	Events    []string  `json:"events"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type WebhookDelivery struct {
+	ID           int64                 `json:"id"`
+	WebhookID    uuid.UUID             `json:"webhook_id"`
+	EventType    string                `json:"event_type"`
+	TicketID     pgtype.UUID           `json:"ticket_id"`
+	Payload      []byte                `json:"payload"`
+	Status       WebhookDeliveryStatus `json:"status"`
+	ResponseCode pgtype.Int4           `json:"response_code"`
+	Attempts     int32                 `json:"attempts"`
+	LastError    pgtype.Text           `json:"last_error"`
+	CreatedAt    time.Time             `json:"created_at"`
+	DeliveredAt  pgtype.Timestamptz    `json:"delivered_at"`
 }

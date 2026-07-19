@@ -143,6 +143,36 @@ func (q *Queries) EnsureUserByEmail(ctx context.Context, arg EnsureUserByEmailPa
 	return i, err
 }
 
+const getFirstAdmin = `-- name: GetFirstAdmin :one
+SELECT id, email, name, role, password_hash, oidc_issuer, oidc_subject, company, token_version, active, created_at, updated_at FROM users
+WHERE role = 'admin' AND active
+ORDER BY created_at, id
+LIMIT 1
+`
+
+// The earliest-created active admin, used at boot to attribute the seeded
+// welcome ticket on a headless/IaC install (where no wizard admin session
+// exists). Deterministic (created_at, then id) so it is stable across calls.
+func (q *Queries) GetFirstAdmin(ctx context.Context) (User, error) {
+	row := q.db.QueryRow(ctx, getFirstAdmin)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Name,
+		&i.Role,
+		&i.PasswordHash,
+		&i.OidcIssuer,
+		&i.OidcSubject,
+		&i.Company,
+		&i.TokenVersion,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, name, role, password_hash, oidc_issuer, oidc_subject, company, token_version, active, created_at, updated_at FROM users
 WHERE email = $1

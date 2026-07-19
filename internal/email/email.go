@@ -89,6 +89,11 @@ func NewEngine(pool *pgxpool.Pool, auth *Auth, blobs storage.Storage) *Engine {
 // Call once during process wiring, before workers or the supervisor start.
 func (e *Engine) SetRiver(rc *river.Client[pgx.Tx]) { e.river = rc }
 
+// River returns the wired River client (nil before SetRiver). The M4 webhook
+// dispatcher reuses it to enqueue deliveries transactionally off ticket
+// events, so no second client needs threading through the HTTP layer.
+func (e *Engine) River() *river.Client[pgx.Tx] { return e.river }
+
 // Auth exposes the engine's credential/token handling to the HTTP layer
 // (mailbox test connections, the Google connect flow).
 func (e *Engine) Auth() *Auth { return e.auth }

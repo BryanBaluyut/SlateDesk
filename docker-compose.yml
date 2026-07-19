@@ -1,18 +1,38 @@
-# SlateDesk v2 — single-node deployment (architecture doc §5/§6, tier 1).
+# SlateDesk v2 — single-node production stack (architecture doc §6, Tier 1):
+# the app (serve + embedded workers) plus PostgreSQL 17, on named volumes.
 #
-# The one variable you must provide is POSTGRES_PASSWORD (the install script
-# generates it into .env; manual path: `echo "POSTGRES_PASSWORD=$(openssl
-# rand -hex 24)" > .env`). DATABASE_URL is wired between the containers —
-# the app itself needs nothing else (architecture §5).
+# This file builds the image from source, so it is the "cloned the repo"
+# path (docker compose up -d --build). The curl|sh installer writes an
+# equivalent compose that pulls a pinned published image instead — see
+# install.sh and docs/deploy.md.
+#
+# The one variable you must provide is POSTGRES_PASSWORD, in a sibling .env:
+#   echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env
+# DATABASE_URL is wired between the containers; the app needs nothing else.
+name: slatedesk
+
 services:
   app:
     build: .
-    image: slatedesk:latest
+    image: ${SLATEDESK_IMAGE:-slatedesk:2.0-beta}
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
+      # The single required app variable, composed from POSTGRES_PASSWORD.
       DATABASE_URL: postgres://slatedesk:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/slatedesk?sslmode=disable
+      # Persistent attachment blob store (matches the image default; explicit
+      # here for clarity).
+      SLATEDESK_DATA_DIR: /data
+      # Optional headless admin bootstrap (first boot only; the wizard is the
+      # default path). Uncomment and set to skip the wizard's first screen:
+      # SLATEDESK_ADMIN_EMAIL: admin@example.com
+      # SLATEDESK_ADMIN_PASSWORD: ${SLATEDESK_ADMIN_PASSWORD:-}
+      # Behind a TLS-terminating reverse proxy that does not forward
+      # X-Forwarded-Proto, set cookies Secure explicitly:
+      # SLATEDESK_COOKIE_SECURE: always
+    volumes:
+      - attachments:/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,3 +55,4 @@ services:
 
 volumes:
   pgdata:
+  attachments:

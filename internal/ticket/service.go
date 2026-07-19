@@ -58,6 +58,20 @@ type Mailer interface {
 	EnqueueAssigneeNotify(ctx context.Context, tx pgx.Tx, ticketID, assigneeID uuid.UUID, actorID *uuid.UUID) error
 }
 
+// EventSink receives externally observable ticket events INSIDE the service
+// transaction — at the exact point pg_notify fires — so durable side effects
+// (M4 webhook deliveries) commit atomically with the ticket write: a webhook
+// delivery can never be enqueued for a rolled-back write, nor lost for a
+// committed one. The dependency points ticket <- webhook (the interface lives
+// here), mirroring Mailer. nil = disabled; all writes behave as before M4.
+type EventSink interface {
+	// OnEvent is called for each notify (ticket.created/updated,
+	// article.created/updated). Implementations filter to the event types
+	// they care about and must be cheap for the rest (article.updated fires
+	// on every delivery-badge transition).
+	OnEvent(ctx context.Context, tx pgx.Tx, eventType string, ticketID uuid.UUID) error
+}
+
 // ticket_events audit row types.
 const (
 	EventCreated         = "created"
@@ -79,6 +93,10 @@ type Service struct {
 	// in M2.
 	mailer Mailer
 
+	// sink, when set (M4 wiring), receives in-transaction event hooks for
+	// durable webhook delivery. nil = webhooks disabled.
+	sink EventSink
+
 	// now is swappable in tests (ticket-number day rollover).
 	now func() time.Time
 }
@@ -96,6 +114,10 @@ func NewService(pool *pgxpool.Pool) *Service {
 // SetMailer wires the email channel's transaction hooks (call once during
 // process wiring, before the service takes traffic).
 func (s *Service) SetMailer(m Mailer) { s.mailer = m }
+
+// SetEventSink wires the webhook dispatcher's transaction hook (call once
+// during process wiring, before the service takes traffic).
+func (s *Service) SetEventSink(sink EventSink) { s.sink = sink }
 
 // nextStatusOnArticle is the add-article status matrix.
 //
@@ -527,6 +549,14 @@ func (s *Service) notify(ctx context.Context, tx pgx.Tx, typ string, ticketID uu
 	}
 	if _, err := tx.Exec(ctx, "SELECT pg_notify($1, $2)", events.Channel, string(payload)); err != nil {
 		return fmt.Errorf("pg_notify %s: %w", typ, err)
+	}
+	// M4: enqueue durable webhook deliveries on the SAME transaction, so a
+	// delivery is never enqueued for a rolled-back write. The sink filters
+	// to subscribable event types and no-ops cheaply for the rest.
+	if s.sink != nil {
+		if err := s.sink.OnEvent(ctx, tx, typ, ticketID); err != nil {
+			return fmt.Errorf("event sink %s: %w", typ, err)
+		}
 	}
 	return nil
 }

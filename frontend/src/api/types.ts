@@ -121,3 +121,73 @@ export const TLS_MODE_LABELS: Record<MailTLSMode, string> = {
   starttls: "STARTTLS",
   none: "None (dev only)",
 };
+
+// Deployable MVP (M4): API keys, webhooks, canned replies.
+export type ApiKey = components["schemas"]["ApiKey"];
+export type ApiKeyScope = components["schemas"]["ApiKeyScope"];
+export type ApiKeyCreated = components["schemas"]["ApiKeyCreated"];
+export type CreateApiKeyRequest = components["schemas"]["CreateApiKeyRequest"];
+export type Webhook = components["schemas"]["Webhook"];
+export type WebhookEvent = components["schemas"]["WebhookEvent"];
+export type WebhookCreated = components["schemas"]["WebhookCreated"];
+export type WebhookDelivery = components["schemas"]["WebhookDelivery"];
+export type WebhookDeliveryStatus =
+  components["schemas"]["WebhookDeliveryStatus"];
+export type WebhookTestResult = components["schemas"]["WebhookTestResult"];
+export type CreateWebhookRequest =
+  components["schemas"]["CreateWebhookRequest"];
+export type UpdateWebhookRequest =
+  components["schemas"]["UpdateWebhookRequest"];
+export type CannedReply = components["schemas"]["CannedReply"];
+export type CreateCannedReplyRequest =
+  components["schemas"]["CreateCannedReplyRequest"];
+export type UpdateCannedReplyRequest =
+  components["schemas"]["UpdateCannedReplyRequest"];
+
+export const API_KEY_SCOPES: readonly ApiKeyScope[] = [
+  "read",
+  "write",
+] as const;
+
+export const API_KEY_SCOPE_LABELS: Record<ApiKeyScope, string> = {
+  read: "Read",
+  write: "Write",
+};
+
+export const WEBHOOK_EVENTS: readonly WebhookEvent[] = [
+  "ticket.created",
+  "ticket.updated",
+  "article.created",
+] as const;
+
+export const WEBHOOK_EVENT_LABELS: Record<WebhookEvent, string> = {
+  "ticket.created": "Ticket created",
+  "ticket.updated": "Ticket updated",
+  "article.created": "Article created",
+};
+
+export const WEBHOOK_DELIVERY_STATUS_LABELS: Record<
+  WebhookDeliveryStatus,
+  string
+> = {
+  pending: "Pending",
+  success: "Delivered",
+  failed: "Failed",
+};
+
+// First-run setup wizard, customer portal, and public form (M4).
+export type SetupStatus = components["schemas"]["SetupStatus"];
+export type SetupAdminRequest = components["schemas"]["SetupAdminRequest"];
+export type SetupInstanceRequest =
+  components["schemas"]["SetupInstanceRequest"];
+export type InstanceSettings = components["schemas"]["InstanceSettings"];
+export type SetupCompleteResult = components["schemas"]["SetupCompleteResult"];
+export type PortalTicket = components["schemas"]["PortalTicket"];
+export type PortalTicketDetail = components["schemas"]["PortalTicketDetail"];
+export type PortalArticle = components["schemas"]["PortalArticle"];
+export type PortalCreateTicketRequest =
+  components["schemas"]["PortalCreateTicketRequest"];
+export type PortalReplyRequest = components["schemas"]["PortalReplyRequest"];
+export type PublicTicketRequest = components["schemas"]["PublicTicketRequest"];
+export type PublicTicketAccepted =
+  components["schemas"]["PublicTicketAccepted"];

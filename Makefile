@@ -61,11 +61,23 @@ db-down:
 	sg docker -c "docker rm -f slatedesk-pg"
 
 # --- Container image (appended) ----------------------------------------------
-.PHONY: docker-build compose-up compose-down
+.PHONY: docker-build dist compose-up compose-down
+
+# Release image tag — the version install.sh pins and docs/deploy.md documents.
+RELEASE_IMAGE ?= slatedesk:2.0-beta
 
 # Build the production image (multi-stage: SPA -> static binary -> distroless).
 docker-build:
 	sg docker -c "docker build -t slatedesk:dev ."
+
+# dist: build the pinned release image. Publishing is a deliberate manual
+# release step (kept out of the Makefile / CI): after `make dist`, tag and
+# push to your registry, e.g.
+#   docker tag $(RELEASE_IMAGE) ghcr.io/bryanbaluyut/slatedesk:2.0-beta
+#   docker push ghcr.io/bryanbaluyut/slatedesk:2.0-beta
+dist:
+	sg docker -c "docker build -t $(RELEASE_IMAGE) ."
+	@echo "built $(RELEASE_IMAGE) — tag & push to publish (see comment above)"
 
 # Full stack from docker-compose.yml; requires POSTGRES_PASSWORD in .env.
 compose-up:

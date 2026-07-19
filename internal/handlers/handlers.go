@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -30,6 +31,7 @@ import (
 	"github.com/BryanBaluyut/slatedesk/internal/storage"
 	"github.com/BryanBaluyut/slatedesk/internal/store"
 	"github.com/BryanBaluyut/slatedesk/internal/ticket"
+	"github.com/BryanBaluyut/slatedesk/internal/webhook"
 )
 
 // Kicker pokes the in-process mailbox supervisor for an immediate
@@ -53,9 +55,17 @@ const (
 	loginIPRefill = time.Second
 )
 
-// Handlers implements api.ServerInterface (all operations; the compiler
-// enforces exhaustiveness via the interface assertion below).
+// Handlers implements api.ServerInterface. The M1-M3 operations are defined
+// as explicit methods (they shadow the embedded stubs); the embedded
+// api.Unimplemented supplies http.StatusNotImplemented handlers for the M4
+// operations whose contract exists in api/openapi.yaml but whose handlers are
+// not yet wired, so the compiler-enforced interface assertion below stays
+// satisfied and the build stays green.
 type Handlers struct {
+	// Unimplemented is embedded so newly specified operations compile as 501
+	// stubs until an explicit method overrides them.
+	api.Unimplemented
+
 	pool         *pgxpool.Pool
 	q            *store.Queries
 	svc          *ticket.Service   // transactional ticket-core writes
@@ -73,6 +83,13 @@ type Handlers struct {
 	box      *secrets.Box    // mailbox credential encryption at write
 	settings *settings.Store // external-url + OAuth state nonces
 	kicker   Kicker          // supervisor poke on mailbox mutations (nil-able)
+
+	// M4 surface.
+	webhookBox     *secrets.Box      // webhook signing-secret encryption at write
+	webhookClient  *http.Client      // synchronous test-ping delivery
+	captcha        CaptchaVerifier   // public-form captcha (Noop = off by default)
+	publicLimiter  *auth.RateLimiter // per-IP public web-form submissions
+	setupCompleted atomic.Bool       // cached once true; gates the API before first-run
 }
 
 var _ api.ServerInterface = (*Handlers)(nil)
@@ -89,27 +106,50 @@ func New(pool *pgxpool.Pool, secret []byte, cookieSecure auth.CookieSecureMode, 
 	if err != nil {
 		return nil, fmt.Errorf("handlers: mailbox credentials box: %w", err)
 	}
+	webhookBox, err := secrets.NewBox(secret, secrets.PurposeWebhookSecret)
+	if err != nil {
+		return nil, fmt.Errorf("handlers: webhook secret box: %w", err)
+	}
 	svc := ticket.NewService(pool)
 	if engine != nil {
 		svc.SetMailer(engine)
+		// M4: enqueue durable webhook deliveries transactionally off ticket
+		// events, reusing the engine's River client (set during wiring before
+		// New is called). nil client (a mis-wired process) leaves the sink
+		// unset — webhook dispatch is simply disabled, never a nil deref.
+		if rc := engine.River(); rc != nil {
+			svc.SetEventSink(webhook.NewDispatcher(rc))
+		}
 	}
 	return &Handlers{
-		pool:         pool,
-		q:            store.New(pool),
-		svc:          svc,
-		hub:          hub,
-		sseSlots:     make(chan struct{}, maxEventStreams),
-		blobs:        blobs,
-		secret:       secret,
-		limiter:      auth.NewRateLimiter(loginBurst, loginRefill),
-		ipLimiter:    auth.NewRateLimiter(loginIPBurst, loginIPRefill),
-		sessionTTL:   auth.DefaultSessionTTL,
-		cookieSecure: cookieSecure,
-		engine:       engine,
-		box:          box,
-		settings:     settings.New(pool),
-		kicker:       kicker,
+		pool:          pool,
+		q:             store.New(pool),
+		svc:           svc,
+		hub:           hub,
+		sseSlots:      make(chan struct{}, maxEventStreams),
+		blobs:         blobs,
+		secret:        secret,
+		limiter:       auth.NewRateLimiter(loginBurst, loginRefill),
+		ipLimiter:     auth.NewRateLimiter(loginIPBurst, loginIPRefill),
+		sessionTTL:    auth.DefaultSessionTTL,
+		cookieSecure:  cookieSecure,
+		engine:        engine,
+		box:           box,
+		settings:      settings.New(pool),
+		kicker:        kicker,
+		webhookBox:    webhookBox,
+		webhookClient: &http.Client{Timeout: webhookTestTimeout},
+		captcha:       NoopCaptcha{},
+		publicLimiter: auth.NewRateLimiter(publicFormBurst, publicFormRefill),
 	}, nil
+}
+
+// SetCaptchaVerifier overrides the public-form captcha verifier (default
+// NoopCaptcha = off). Call during wiring before the server takes traffic.
+func (h *Handlers) SetCaptchaVerifier(v CaptchaVerifier) {
+	if v != nil {
+		h.captcha = v
+	}
 }
 
 // kickMailboxes pokes the in-process supervisor (if any) so a mailbox

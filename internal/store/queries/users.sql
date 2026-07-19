@@ -78,6 +78,15 @@ SELECT EXISTS (
     WHERE role = 'admin' AND active
 )::boolean AS admin_exists;
 
+-- name: GetFirstAdmin :one
+-- The earliest-created active admin, used at boot to attribute the seeded
+-- welcome ticket on a headless/IaC install (where no wizard admin session
+-- exists). Deterministic (created_at, then id) so it is stable across calls.
+SELECT * FROM users
+WHERE role = 'admin' AND active
+ORDER BY created_at, id
+LIMIT 1;
+
 -- name: UpsertAdmin :one
 INSERT INTO users (email, name, role, password_hash)
 VALUES ($1, $2, 'admin', $3)

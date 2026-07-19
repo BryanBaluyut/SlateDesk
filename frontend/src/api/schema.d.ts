@@ -713,6 +713,435 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/setup/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get first-run setup status
+         * @description Whether the first-run installer has completed and whether the
+         *     signed installer token is still required. Unauthenticated so the
+         *     wizard SPA can decide what to render before any account exists.
+         *     `needs_token` is true only while no admin exists yet — the state
+         *     in which `POST /setup/admin` must carry the installer token; once
+         *     an admin exists, the remaining steps use that admin's session.
+         */
+        get: operations["getSetupStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/setup/admin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create the first admin (installer step 1)
+         * @description Creates the first administrator account and immediately opens a
+         *     session for it (sets the `sd_session` cookie). Requires the signed
+         *     installer token printed to the server logs on first boot — never a
+         *     default credential. Valid only while no admin exists yet; once an
+         *     admin exists the token is invalidated and this returns 409. The
+         *     subsequent installer steps authenticate with the session set here.
+         */
+        post: operations["createSetupAdmin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/setup/instance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set instance name and external URL (installer step 2)
+         * @description Records the instance display name and public external URL. Uses
+         *     the admin principal established by `POST /setup/admin` (or any
+         *     admin principal); available only while setup is incomplete.
+         *     Idempotent — re-submitting overwrites. The external URL is
+         *     normalized like `PUT /settings/external-url` (absolute http(s), no
+         *     path/query/fragment, trailing slash stripped). **Admin only.**
+         */
+        post: operations["setSetupInstance"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/setup/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish first-run setup (installer step 3)
+         * @description Marks setup complete — which permanently invalidates the installer
+         *     token — and seeds a welcome ticket so the workspace opens on a
+         *     working example rather than an empty queue. Available only while
+         *     setup is incomplete; a second call after completion returns 409.
+         *     **Admin only.**
+         */
+        post: operations["completeSetup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/portal/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my tickets
+         * @description Every ticket whose requester is the calling customer, newest
+         *     first. **Customer role only.** No other user's tickets are ever
+         *     returned; assignee and team are omitted from the portal
+         *     projection.
+         */
+        get: operations["listPortalTickets"];
+        put?: never;
+        /**
+         * Open a new ticket
+         * @description Opens a ticket with the calling customer as requester (channel
+         *     `web`); the body becomes the first public article. **Customer role
+         *     only.**
+         */
+        post: operations["createPortalTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/portal/tickets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Ticket id (must belong to the calling customer). */
+                id: components["parameters"]["PortalTicketID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get one of my tickets
+         * @description The ticket and its thread, filtered to **public** articles only —
+         *     internal notes are never included. **Customer role only.** A
+         *     ticket the caller does not own returns **404, not 403**, so the
+         *     endpoint cannot be used to probe which ticket ids exist.
+         */
+        get: operations["getPortalTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/portal/tickets/{id}/reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Ticket id (must belong to the calling customer). */
+                id: components["parameters"]["PortalTicketID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reply to one of my tickets
+         * @description Appends a public customer reply to the ticket and, if it was
+         *     `waiting_on_customer`, flips it back to `open`. **Customer role
+         *     only.** A ticket the caller does not own returns **404, not
+         *     403**.
+         */
+        post: operations["replyPortalTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a ticket from the public web form
+         * @description Unauthenticated ticket intake for the single built-in web form
+         *     (channel `web`). The requester is auto-created from (or matched
+         *     to) `email`; the body becomes the first public article. Returns
+         *     **202** with the assigned ticket number.
+         *
+         *     Abuse controls: the request is **rate limited per client IP** (429
+         *     when exceeded). `_honeypot` is a hidden field that real users
+         *     leave empty — when it is non-empty the submission is silently
+         *     accepted (still **202**) but no ticket is created, so bots get no
+         *     signal, and `ticket_number` is then absent. An optional captcha
+         *     verification stub is **off by default**; when an operator enables
+         *     it, a missing or invalid token is a 400.
+         */
+        post: operations["submitPublicTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List API keys
+         * @description All API keys, live first then revoked, newest first. Secrets are
+         *     never included — only the display prefix, scopes, and usage
+         *     metadata. **Admin only.**
+         */
+        get: operations["listApiKeys"];
+        put?: never;
+        /**
+         * Create an API key
+         * @description Mints a scoped key. The full plaintext key (`sd_live_…`) is
+         *     returned **once** in this response and never again — store it now.
+         *     Only its SHA-256 digest is persisted. **Admin only.**
+         */
+        post: operations["createApiKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api-keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description API key id. */
+                id: components["parameters"]["ApiKeyID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an API key
+         * @description Revokes the key (soft delete): it stops authenticating
+         *     immediately, but the row is retained for the audit trail.
+         *     Idempotent — revoking an unknown or already-revoked key is a 404.
+         *     **Admin only.**
+         */
+        delete: operations["revokeApiKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List webhooks
+         * @description All configured webhook endpoints, newest first. The signing secret
+         *     is never included. **Admin only.**
+         */
+        get: operations["listWebhooks"];
+        put?: never;
+        /**
+         * Create a webhook
+         * @description Registers an outbound endpoint subscribed to one or more event
+         *     types (`ticket.created`, `ticket.updated`, `article.created`).
+         *     Each delivery is signed `X-SlateDesk-Signature: sha256=<hex HMAC>`
+         *     over the raw body using the endpoint's signing secret. Supply
+         *     `secret` to set that secret, or omit it to have one generated;
+         *     either way the effective secret is returned **once** as
+         *     `signing_secret` so it can be configured on the receiver, and it is
+         *     never returned again. **Admin only.**
+         */
+        post: operations["createWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Webhook id. */
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a webhook
+         * @description Removes the endpoint and its delivery log (cascade). **Admin
+         *     only.**
+         */
+        delete: operations["deleteWebhook"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a webhook
+         * @description Partial update; omitted fields are left unchanged. Supplying
+         *     `secret` rotates the signing secret; like other credential
+         *     rotations, the new secret is **not** echoed in the response.
+         *     **Admin only.**
+         */
+        patch: operations["updateWebhook"];
+        trace?: never;
+    };
+    "/webhooks/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test ping to a webhook
+         * @description Synchronously delivers a signed `ping` payload to the endpoint and
+         *     reports the outcome. A non-2xx response from the endpoint is a
+         *     **200 with `ok=false`** — the ping was attempted; the result is the
+         *     payload. The ping is not recorded in the delivery log. **Admin
+         *     only.**
+         */
+        post: operations["testWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List recent webhook deliveries
+         * @description The endpoint's recent delivery attempts, newest first — the
+         *     durable outbox log (status, HTTP response code, attempt count, last
+         *     error). **Admin only.**
+         */
+        get: operations["listWebhookDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/canned-replies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List canned replies
+         * @description All canned replies, sorted by title. **Agent or admin.**
+         */
+        get: operations["listCannedReplies"];
+        put?: never;
+        /**
+         * Create a canned reply
+         * @description Stores a reusable snippet. The `body` keeps its raw template;
+         *     `{{ticket.number}}` and `{{requester.name}}` placeholders are
+         *     substituted at composer-insert time, not stored expanded. **Agent
+         *     or admin.**
+         */
+        post: operations["createCannedReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/canned-replies/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Canned reply id. */
+                id: components["parameters"]["CannedReplyID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a canned reply
+         * @description Permanently removes the snippet. **Agent or admin.**
+         */
+        delete: operations["deleteCannedReply"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a canned reply
+         * @description Partial update; omitted fields are left unchanged. **Agent or
+         *     admin.**
+         */
+        patch: operations["updateCannedReply"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1368,6 +1797,332 @@ export interface components {
              */
             external_url: string;
         };
+        /** @description First-run installer state (M4). */
+        SetupStatus: {
+            /**
+             * @description True once the installer has finished (or a headless admin was
+             *     created).
+             */
+            completed: boolean;
+            /**
+             * @description True while no admin exists yet — the state in which
+             *     `POST /setup/admin` must carry the signed installer token.
+             *     False once an admin exists (remaining steps use that session).
+             */
+            needs_token: boolean;
+        };
+        SetupAdminRequest: {
+            /**
+             * @description The signed installer token printed to the server logs on first
+             *     boot.
+             */
+            token: string;
+            name: string;
+            /** Format: email */
+            email: string;
+            /** @description Initial admin password (minimum 10 characters). */
+            password: string;
+        };
+        SetupInstanceRequest: {
+            /** @description Instance display name (branding). */
+            name: string;
+            /**
+             * Format: uri
+             * @description Absolute http(s) base URL with no path, query, or fragment; a
+             *     trailing slash is stripped before storage.
+             */
+            external_url: string;
+        };
+        /** @description The instance display name and public URL settings. */
+        InstanceSettings: {
+            /** @description Instance display name ('' until configured). */
+            name: string;
+            /** @description Public base URL, no trailing slash ('' until configured). */
+            external_url: string;
+        };
+        /** @description Outcome of finishing first-run setup. */
+        SetupCompleteResult: {
+            /** @description Always true on success. */
+            completed: boolean;
+            /**
+             * @description Number of the seeded welcome ticket (YYYYMMDD-NNNN); null if
+             *     one already existed and none was seeded.
+             */
+            welcome_ticket_number: string | null;
+        };
+        /**
+         * @description A customer's own ticket, portal projection. Deliberately omits
+         *     assignee and team — the portal never exposes staff routing.
+         */
+        PortalTicket: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            subject: string;
+            status: components["schemas"]["TicketStatus"];
+            priority: components["schemas"]["TicketPriority"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            closed_at: string | null;
+        };
+        /**
+         * @description One **public** message in a portal ticket's thread. Internal notes
+         *     are never represented here. The author is reduced to `sender_type`
+         *     (customer / agent / system) so staff identities are not exposed.
+         */
+        PortalArticle: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            ticket_id: string;
+            sender_type: components["schemas"]["ArticleSenderType"];
+            body_text: string;
+            /** @description Sanitized HTML body; null when the article is plain text. */
+            body_html: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description A portal ticket with its public thread. */
+        PortalTicketDetail: components["schemas"]["PortalTicket"] & {
+            /** @description Public articles only, oldest first. */
+            articles: components["schemas"]["PortalArticle"][];
+        };
+        PortalCreateTicketRequest: {
+            subject: string;
+            /** @description Plain-text body of the ticket's first public article. */
+            body: string;
+        };
+        PortalReplyRequest: {
+            /** @description Plain-text public reply body. */
+            body: string;
+        };
+        PublicTicketRequest: {
+            subject: string;
+            body: string;
+            /**
+             * Format: email
+             * @description Submitter's email; the requester is created from or matched to
+             *     it.
+             */
+            email: string;
+            /** @description Submitter's display name (optional). */
+            name?: string;
+            /**
+             * @description Anti-spam honeypot. Hidden from real users and expected to be
+             *     empty; a non-empty value causes the submission to be silently
+             *     dropped (still 202, no ticket created).
+             */
+            _honeypot?: string;
+        };
+        /**
+         * @description Acknowledgement of a public submission. `ticket_number` is present
+         *     when a ticket was created and absent when an anti-spam control
+         *     silently dropped the submission.
+         */
+        PublicTicketAccepted: {
+            /** @description The assigned ticket number (YYYYMMDD-NNNN). */
+            ticket_number?: string;
+        };
+        /**
+         * @description API-key permission. `read` allows safe (GET) operations; `write`
+         *     additionally allows mutating operations.
+         * @enum {string}
+         */
+        ApiKeyScope: "read" | "write";
+        /**
+         * @description Scoped machine API key metadata. The secret is never included —
+         *     only the display prefix and usage columns.
+         */
+        ApiKey: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description Non-secret display fragment (e.g. "sd_live_ab12cd"). */
+            key_prefix: string;
+            scopes: components["schemas"]["ApiKeyScope"][];
+            /**
+             * Format: uuid
+             * @description The admin/agent who minted the key; requests act as this user.
+             */
+            created_by: string;
+            /**
+             * Format: date-time
+             * @description Last successful authentication with this key; null if never
+             *     used.
+             */
+            last_used_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When the key was revoked; null while live.
+             */
+            revoked_at: string | null;
+        };
+        CreateApiKeyRequest: {
+            name: string;
+            scopes: components["schemas"]["ApiKeyScope"][];
+        };
+        /**
+         * @description A newly minted key including its **one-time** plaintext. The `key`
+         *     is shown only in this response and can never be retrieved again.
+         */
+        ApiKeyCreated: components["schemas"]["ApiKey"] & {
+            /**
+             * @description Full plaintext key (`sd_live_…`). Returned once; store it
+             *     now. Only its SHA-256 digest is persisted.
+             */
+            key: string;
+        };
+        /**
+         * @description A subscribable outbound event type.
+         * @enum {string}
+         */
+        WebhookEvent: "ticket.created" | "ticket.updated" | "article.created";
+        /**
+         * @description Delivery state: `pending` (enqueued or retrying), `success` (2xx
+         *     received), `failed` (retries exhausted).
+         * @enum {string}
+         */
+        WebhookDeliveryStatus: "pending" | "success" | "failed";
+        /**
+         * @description An outbound webhook endpoint. The signing secret is never included
+         *     in any response.
+         */
+        Webhook: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: uri */
+            url: string;
+            events: components["schemas"]["WebhookEvent"][];
+            /** @description Inactive endpoints receive no deliveries. */
+            active: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CreateWebhookRequest: {
+            name: string;
+            /** Format: uri */
+            url: string;
+            events: components["schemas"]["WebhookEvent"][];
+            /** @default true */
+            active: boolean;
+            /**
+             * @description HMAC-SHA256 signing secret. Write-only: encrypted at rest and
+             *     never echoed. Omit to have a random secret generated; the
+             *     effective secret is returned once as `signing_secret`.
+             */
+            secret?: string;
+        };
+        /** @description A newly created webhook including its **one-time** signing secret. */
+        WebhookCreated: components["schemas"]["Webhook"] & {
+            /**
+             * @description The effective HMAC-SHA256 signing secret (supplied or
+             *     generated). Returned once; configure it on the receiver to
+             *     verify the `X-SlateDesk-Signature` header. Never returned
+             *     again.
+             */
+            signing_secret: string;
+        };
+        /** @description Partial update; omitted fields are left unchanged. */
+        UpdateWebhookRequest: {
+            name?: string;
+            /** Format: uri */
+            url?: string;
+            events?: components["schemas"]["WebhookEvent"][];
+            active?: boolean;
+            /**
+             * @description Rotate the HMAC-SHA256 signing secret. Write-only and never
+             *     echoed — the caller supplies the new value (no generation on
+             *     update).
+             */
+            secret?: string;
+        };
+        /**
+         * @description Outcome of a synchronous webhook test ping. `ok=false` still
+         *     arrives as HTTP 200 — the ping was attempted; this object is its
+         *     result.
+         */
+        WebhookTestResult: {
+            /** @description True when the endpoint answered 2xx. */
+            ok: boolean;
+            /** @description HTTP status returned by the endpoint; null on transport error. */
+            response_code: number | null;
+            /**
+             * @description Human-readable outcome (the error on failure, a short summary
+             *     otherwise).
+             */
+            detail: string;
+            /**
+             * Format: int64
+             * @description Wall-clock duration of the ping.
+             */
+            latency_ms: number;
+        };
+        /** @description One row of the durable webhook delivery log. */
+        WebhookDelivery: {
+            /** Format: int64 */
+            id: number;
+            /** Format: uuid */
+            webhook_id: string;
+            /** @description The event type this delivery carries. */
+            event_type: string;
+            /**
+             * Format: uuid
+             * @description The ticket the event concerns; null when not ticket-scoped.
+             */
+            ticket_id: string | null;
+            /** @description The signed JSON payload delivered to the endpoint. */
+            payload: {
+                [key: string]: unknown;
+            };
+            status: components["schemas"]["WebhookDeliveryStatus"];
+            /** @description Last HTTP status from the endpoint; null before any response. */
+            response_code: number | null;
+            /** @description Number of delivery attempts so far. */
+            attempts: number;
+            /** @description Most recent delivery error; null on success. */
+            last_error: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When a 2xx was received; null until delivered.
+             */
+            delivered_at: string | null;
+        };
+        /**
+         * @description A reusable agent reply snippet. `body` stores the raw template;
+         *     `{{ticket.number}}` / `{{requester.name}}` are substituted at
+         *     composer-insert time.
+         */
+        CannedReply: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            body: string;
+            /** Format: uuid */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CreateCannedReplyRequest: {
+            title: string;
+            body: string;
+        };
+        /** @description Partial update; omitted fields are left unchanged. */
+        UpdateCannedReplyRequest: {
+            title?: string;
+            body?: string;
+        };
     };
     responses: {
         /** @description Malformed request body or parameters. */
@@ -1440,6 +2195,14 @@ export interface components {
         TagID: string;
         /** @description Mailbox id. */
         MailboxID: string;
+        /** @description API key id. */
+        ApiKeyID: string;
+        /** @description Webhook id. */
+        WebhookID: string;
+        /** @description Canned reply id. */
+        CannedReplyID: string;
+        /** @description Ticket id (must belong to the calling customer). */
+        PortalTicketID: string;
     };
     requestBodies: never;
     headers: never;
@@ -2708,6 +3471,640 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getSetupStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current setup state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupStatus"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    createSetupAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetupAdminRequest"];
+            };
+        };
+        responses: {
+            /** @description Admin created and signed in; session cookie set. */
+            200: {
+                headers: {
+                    /** @description `sd_session` signed HttpOnly session cookie. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description Missing, invalid, or expired installer token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Setup is already complete (an admin already exists). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    setSetupInstance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetupInstanceRequest"];
+            };
+        };
+        responses: {
+            /** @description The stored (normalized) instance settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstanceSettings"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Setup is already complete. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    completeSetup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Setup completed; welcome ticket seeded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupCompleteResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Setup is already complete. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listPortalTickets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's own tickets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalTicket"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    createPortalTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalCreateTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description Ticket created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalTicketDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    getPortalTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Ticket id (must belong to the calling customer). */
+                id: components["parameters"]["PortalTicketID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The ticket with its public thread. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalTicketDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    replyPortalTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Ticket id (must belong to the calling customer). */
+                id: components["parameters"]["PortalTicketID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortalReplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Reply appended. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortalArticle"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    submitPublicTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicTicketRequest"];
+            };
+        };
+        responses: {
+            /**
+             * @description Submission accepted. `ticket_number` is present when a ticket
+             *     was created and absent when the submission was silently
+             *     dropped by an anti-spam control.
+             */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicTicketAccepted"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description Too many submissions from this client; retry later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            default: components["responses"]["Problem"];
+        };
+    };
+    listApiKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All API keys. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKey"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    createApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateApiKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Key created; plaintext returned once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyCreated"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    revokeApiKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description API key id. */
+                id: components["parameters"]["ApiKeyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Key revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listWebhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All webhooks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    createWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWebhookRequest"];
+            };
+        };
+        responses: {
+            /** @description Webhook created; signing secret returned once. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookCreated"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Webhook id. */
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Webhook deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Webhook id. */
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWebhookRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated webhook (secret never included). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Webhook"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    testWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Webhook id. */
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Test outcome. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookTestResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listWebhookDeliveries: {
+        parameters: {
+            query?: {
+                /** @description Maximum rows to return. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Webhook id. */
+                id: components["parameters"]["WebhookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent deliveries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookDelivery"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    listCannedReplies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All canned replies. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CannedReply"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    createCannedReply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCannedReplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Canned reply created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CannedReply"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    deleteCannedReply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Canned reply id. */
+                id: components["parameters"]["CannedReplyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Canned reply deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Problem"];
+        };
+    };
+    updateCannedReply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Canned reply id. */
+                id: components["parameters"]["CannedReplyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCannedReplyRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated canned reply. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CannedReply"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             default: components["responses"]["Problem"];
         };
     };

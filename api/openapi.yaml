@@ -28,7 +28,51 @@ info:
     `POST /articles/{id}/retry-send` is agent or admin, like the rest of
     the ticket core. Mailbox responses **never** contain credentials:
     passwords, client secrets, and OAuth tokens are write-only inputs.
-  version: 0.3.0
+
+    Milestone 4 makes SlateDesk a deployable product and adds six
+    surfaces: the first-run **setup** wizard (`/setup/*`), the customer
+    **portal** (`/portal/*`), the built-in **public** web form
+    (`/public/tickets`), scoped **API keys** (`/api-keys`), outbound
+    **webhooks** (`/webhooks`), and **canned replies**
+    (`/canned-replies`).
+
+    Authentication (M4): a second scheme, `apiKey`, is accepted on
+    `/api/v1` as an **alternative** to the session cookie. The two appear
+    as separate entries under the top-level `security`, and a list of
+    requirement objects is an OR — so either scheme **alone**
+    authenticates a request and the two are **never both required**. An
+    API key is an `sd_live_`-prefixed bearer token
+    (`Authorization: Bearer sd_live_…`) that acts as the admin or agent
+    who minted it, carrying that key's scopes. Scopes are `read` and
+    `write`: a `read`-only key may call safe (GET) operations but is
+    refused with 403 on any mutating operation. OpenAPI cannot attach
+    scopes to an HTTP-bearer scheme, so the write gate is enforced in the
+    handler and documented here rather than expressed per-operation.
+    Session cookies are not scope-limited.
+
+    Access model (M4): the setup wizard (`/setup/*`) and the public web
+    form (`/public/tickets`) are **unauthenticated** (see the setup-token
+    note below and the per-operation rate-limit/anti-spam notes). The
+    customer **portal** requires a **customer-role** principal and only
+    ever exposes the caller's *own* tickets and their *public*
+    (non-internal) articles — a hard isolation boundary; a request for
+    another user's ticket returns **404, not 403**, so ticket existence
+    is never disclosed (an agent/admin principal, including an API key,
+    is refused with 403). **API keys** and **webhooks** are **admin
+    only**; **canned replies** are **agent or admin**.
+
+    Setup-token model: on first boot, before any admin exists, the server
+    prints a one-time **installer URL** carrying a signed token to its
+    logs (never a default password). `POST /setup/admin` requires that
+    token and creates the first admin plus a session; the remaining setup
+    steps authenticate with that admin session. The token is valid only
+    while setup is incomplete and is invalidated the moment an admin
+    exists — whether created through the wizard, `slatedesk admin
+    create`, or the `SLATEDESK_ADMIN_EMAIL` / `SLATEDESK_ADMIN_PASSWORD`
+    headless path. Setup state lives in the `settings` table, not process
+    memory, so it survives restarts and is shared across replicas; every
+    setup operation is idempotent.
+  version: 0.4.0
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -39,6 +83,7 @@ servers:
 
 security:
   - cookieAuth: []
+  - apiKey: []
 
 tags:
   - name: auth
@@ -71,6 +116,33 @@ tags:
       write-only.
   - name: settings
     description: Instance settings. **Admin only.**
+  - name: setup
+    description: |
+      First-run installer wizard (M4). Unauthenticated and gated on
+      `setup_completed=false`; `POST /setup/admin` additionally requires
+      the signed installer token printed to the logs on first boot.
+  - name: portal
+    description: |
+      Customer self-service portal (M4). **Customer role only.** Every
+      operation is scoped to the caller's own tickets and their public
+      articles; cross-owner access returns 404, not 403.
+  - name: public
+    description: |
+      Unauthenticated public web form (M4). One built-in endpoint;
+      per-IP rate limited with a honeypot and an optional captcha stub.
+  - name: api-keys
+    description: |
+      Scoped machine API keys (M4). **Admin only.** The plaintext key is
+      shown once at creation and never again; only its SHA-256 digest is
+      stored.
+  - name: webhooks
+    description: |
+      Outbound HTTP webhooks with HMAC-SHA256 signatures and a durable
+      delivery log (M4). **Admin only.**
+  - name: canned-replies
+    description: |
+      Reusable agent reply snippets with basic variable substitution
+      (M4). **Agent or admin.**
 
 paths:
   /auth/login:
@@ -1427,6 +1499,673 @@ paths:
         default:
           $ref: "#/components/responses/Problem"
 
+  /setup/status:
+    get:
+      operationId: getSetupStatus
+      summary: Get first-run setup status
+      description: |
+        Whether the first-run installer has completed and whether the
+        signed installer token is still required. Unauthenticated so the
+        wizard SPA can decide what to render before any account exists.
+        `needs_token` is true only while no admin exists yet — the state
+        in which `POST /setup/admin` must carry the installer token; once
+        an admin exists, the remaining steps use that admin's session.
+      tags: [setup]
+      security: []
+      responses:
+        "200":
+          description: Current setup state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupStatus"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /setup/admin:
+    post:
+      operationId: createSetupAdmin
+      summary: Create the first admin (installer step 1)
+      description: |
+        Creates the first administrator account and immediately opens a
+        session for it (sets the `sd_session` cookie). Requires the signed
+        installer token printed to the server logs on first boot — never a
+        default credential. Valid only while no admin exists yet; once an
+        admin exists the token is invalidated and this returns 409. The
+        subsequent installer steps authenticate with the session set here.
+      tags: [setup]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupAdminRequest"
+      responses:
+        "200":
+          description: Admin created and signed in; session cookie set.
+          headers:
+            Set-Cookie:
+              description: "`sd_session` signed HttpOnly session cookie."
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Missing, invalid, or expired installer token.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Setup is already complete (an admin already exists).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /setup/instance:
+    post:
+      operationId: setSetupInstance
+      summary: Set instance name and external URL (installer step 2)
+      description: |
+        Records the instance display name and public external URL. Uses
+        the admin principal established by `POST /setup/admin` (or any
+        admin principal); available only while setup is incomplete.
+        Idempotent — re-submitting overwrites. The external URL is
+        normalized like `PUT /settings/external-url` (absolute http(s), no
+        path/query/fragment, trailing slash stripped). **Admin only.**
+      tags: [setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupInstanceRequest"
+      responses:
+        "200":
+          description: The stored (normalized) instance settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstanceSettings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Setup is already complete.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /setup/complete:
+    post:
+      operationId: completeSetup
+      summary: Finish first-run setup (installer step 3)
+      description: |
+        Marks setup complete — which permanently invalidates the installer
+        token — and seeds a welcome ticket so the workspace opens on a
+        working example rather than an empty queue. Available only while
+        setup is incomplete; a second call after completion returns 409.
+        **Admin only.**
+      tags: [setup]
+      responses:
+        "200":
+          description: Setup completed; welcome ticket seeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupCompleteResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Setup is already complete.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /portal/tickets:
+    get:
+      operationId: listPortalTickets
+      summary: List my tickets
+      description: |
+        Every ticket whose requester is the calling customer, newest
+        first. **Customer role only.** No other user's tickets are ever
+        returned; assignee and team are omitted from the portal
+        projection.
+      tags: [portal]
+      responses:
+        "200":
+          description: The caller's own tickets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PortalTicket"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createPortalTicket
+      summary: Open a new ticket
+      description: |
+        Opens a ticket with the calling customer as requester (channel
+        `web`); the body becomes the first public article. **Customer role
+        only.**
+      tags: [portal]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalCreateTicketRequest"
+      responses:
+        "201":
+          description: Ticket created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalTicketDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /portal/tickets/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PortalTicketID"
+    get:
+      operationId: getPortalTicket
+      summary: Get one of my tickets
+      description: |
+        The ticket and its thread, filtered to **public** articles only —
+        internal notes are never included. **Customer role only.** A
+        ticket the caller does not own returns **404, not 403**, so the
+        endpoint cannot be used to probe which ticket ids exist.
+      tags: [portal]
+      responses:
+        "200":
+          description: The ticket with its public thread.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalTicketDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /portal/tickets/{id}/reply:
+    parameters:
+      - $ref: "#/components/parameters/PortalTicketID"
+    post:
+      operationId: replyPortalTicket
+      summary: Reply to one of my tickets
+      description: |
+        Appends a public customer reply to the ticket and, if it was
+        `waiting_on_customer`, flips it back to `open`. **Customer role
+        only.** A ticket the caller does not own returns **404, not
+        403**.
+      tags: [portal]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalReplyRequest"
+      responses:
+        "201":
+          description: Reply appended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalArticle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /public/tickets:
+    post:
+      operationId: submitPublicTicket
+      summary: Submit a ticket from the public web form
+      description: |
+        Unauthenticated ticket intake for the single built-in web form
+        (channel `web`). The requester is auto-created from (or matched
+        to) `email`; the body becomes the first public article. Returns
+        **202** with the assigned ticket number.
+
+        Abuse controls: the request is **rate limited per client IP** (429
+        when exceeded). `_honeypot` is a hidden field that real users
+        leave empty — when it is non-empty the submission is silently
+        accepted (still **202**) but no ticket is created, so bots get no
+        signal, and `ticket_number` is then absent. An optional captcha
+        verification stub is **off by default**; when an operator enables
+        it, a missing or invalid token is a 400.
+      tags: [public]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublicTicketRequest"
+      responses:
+        "202":
+          description: |
+            Submission accepted. `ticket_number` is present when a ticket
+            was created and absent when the submission was silently
+            dropped by an anti-spam control.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicTicketAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          description: Too many submissions from this client; retry later.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /api-keys:
+    get:
+      operationId: listApiKeys
+      summary: List API keys
+      description: |
+        All API keys, live first then revoked, newest first. Secrets are
+        never included — only the display prefix, scopes, and usage
+        metadata. **Admin only.**
+      tags: [api-keys]
+      responses:
+        "200":
+          description: All API keys.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiKey"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createApiKey
+      summary: Create an API key
+      description: |
+        Mints a scoped key. The full plaintext key (`sd_live_…`) is
+        returned **once** in this response and never again — store it now.
+        Only its SHA-256 digest is persisted. **Admin only.**
+      tags: [api-keys]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiKeyRequest"
+      responses:
+        "201":
+          description: Key created; plaintext returned once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /api-keys/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ApiKeyID"
+    delete:
+      operationId: revokeApiKey
+      summary: Revoke an API key
+      description: |
+        Revokes the key (soft delete): it stops authenticating
+        immediately, but the row is retained for the audit trail.
+        Idempotent — revoking an unknown or already-revoked key is a 404.
+        **Admin only.**
+      tags: [api-keys]
+      responses:
+        "204":
+          description: Key revoked.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /webhooks:
+    get:
+      operationId: listWebhooks
+      summary: List webhooks
+      description: |
+        All configured webhook endpoints, newest first. The signing secret
+        is never included. **Admin only.**
+      tags: [webhooks]
+      responses:
+        "200":
+          description: All webhooks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Webhook"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createWebhook
+      summary: Create a webhook
+      description: |
+        Registers an outbound endpoint subscribed to one or more event
+        types (`ticket.created`, `ticket.updated`, `article.created`).
+        Each delivery is signed `X-SlateDesk-Signature: sha256=<hex HMAC>`
+        over the raw body using the endpoint's signing secret. Supply
+        `secret` to set that secret, or omit it to have one generated;
+        either way the effective secret is returned **once** as
+        `signing_secret` so it can be configured on the receiver, and it is
+        never returned again. **Admin only.**
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWebhookRequest"
+      responses:
+        "201":
+          description: Webhook created; signing secret returned once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /webhooks/{id}:
+    parameters:
+      - $ref: "#/components/parameters/WebhookID"
+    patch:
+      operationId: updateWebhook
+      summary: Update a webhook
+      description: |
+        Partial update; omitted fields are left unchanged. Supplying
+        `secret` rotates the signing secret; like other credential
+        rotations, the new secret is **not** echoed in the response.
+        **Admin only.**
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWebhookRequest"
+      responses:
+        "200":
+          description: The updated webhook (secret never included).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteWebhook
+      summary: Delete a webhook
+      description: |
+        Removes the endpoint and its delivery log (cascade). **Admin
+        only.**
+      tags: [webhooks]
+      responses:
+        "204":
+          description: Webhook deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /webhooks/{id}/test:
+    post:
+      operationId: testWebhook
+      summary: Send a test ping to a webhook
+      description: |
+        Synchronously delivers a signed `ping` payload to the endpoint and
+        reports the outcome. A non-2xx response from the endpoint is a
+        **200 with `ok=false`** — the ping was attempted; the result is the
+        payload. The ping is not recorded in the delivery log. **Admin
+        only.**
+      tags: [webhooks]
+      parameters:
+        - $ref: "#/components/parameters/WebhookID"
+      responses:
+        "200":
+          description: Test outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookTestResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /webhooks/{id}/deliveries:
+    get:
+      operationId: listWebhookDeliveries
+      summary: List recent webhook deliveries
+      description: |
+        The endpoint's recent delivery attempts, newest first — the
+        durable outbox log (status, HTTP response code, attempt count, last
+        error). **Admin only.**
+      tags: [webhooks]
+      parameters:
+        - $ref: "#/components/parameters/WebhookID"
+        - name: limit
+          in: query
+          description: Maximum rows to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Recent deliveries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WebhookDelivery"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /canned-replies:
+    get:
+      operationId: listCannedReplies
+      summary: List canned replies
+      description: |
+        All canned replies, sorted by title. **Agent or admin.**
+      tags: [canned-replies]
+      responses:
+        "200":
+          description: All canned replies.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CannedReply"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createCannedReply
+      summary: Create a canned reply
+      description: |
+        Stores a reusable snippet. The `body` keeps its raw template;
+        `{{ticket.number}}` and `{{requester.name}}` placeholders are
+        substituted at composer-insert time, not stored expanded. **Agent
+        or admin.**
+      tags: [canned-replies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCannedReplyRequest"
+      responses:
+        "201":
+          description: Canned reply created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CannedReply"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Problem"
+
+  /canned-replies/{id}:
+    parameters:
+      - $ref: "#/components/parameters/CannedReplyID"
+    patch:
+      operationId: updateCannedReply
+      summary: Update a canned reply
+      description: |
+        Partial update; omitted fields are left unchanged. **Agent or
+        admin.**
+      tags: [canned-replies]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCannedReplyRequest"
+      responses:
+        "200":
+          description: The updated canned reply.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CannedReply"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+    delete:
+      operationId: deleteCannedReply
+      summary: Delete a canned reply
+      description: |
+        Permanently removes the snippet. **Agent or admin.**
+      tags: [canned-replies]
+      responses:
+        "204":
+          description: Canned reply deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Problem"
+
 components:
   securitySchemes:
     cookieAuth:
@@ -1437,6 +2176,24 @@ components:
         Signed HttpOnly session cookie (SameSite=Lax) carrying the user id
         and token_version. Obtained via POST /auth/login; cleared via
         POST /auth/logout.
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: sd_live_...
+      description: |
+        Scoped machine API key presented as
+        `Authorization: Bearer sd_live_…`. An **alternative** to
+        `cookieAuth` on every `/api/v1` operation: because the top-level
+        `security` lists the two schemes as separate requirement objects
+        (an OR), either scheme alone authenticates a request and the two
+        are never both required. The key is a public `sd_live_` prefix
+        plus 256 bits of base62 entropy; only its SHA-256 digest is
+        stored, and the request acts as the admin or agent who created
+        the key, carrying that key's scopes. Scopes are `read` and
+        `write` — a `read` key is refused (403) on mutating operations.
+        OpenAPI cannot bind scopes to an HTTP-bearer scheme, so the scope
+        gate is enforced in the handler and documented rather than
+        expressed as security scopes here.
 
   parameters:
     UserID:
@@ -1492,6 +2249,38 @@ components:
       in: path
       required: true
       description: Mailbox id.
+      schema:
+        type: string
+        format: uuid
+    ApiKeyID:
+      name: id
+      in: path
+      required: true
+      description: API key id.
+      schema:
+        type: string
+        format: uuid
+    WebhookID:
+      name: id
+      in: path
+      required: true
+      description: Webhook id.
+      schema:
+        type: string
+        format: uuid
+    CannedReplyID:
+      name: id
+      in: path
+      required: true
+      description: Canned reply id.
+      schema:
+        type: string
+        format: uuid
+    PortalTicketID:
+      name: id
+      in: path
+      required: true
+      description: Ticket id (must belong to the calling customer).
       schema:
         type: string
         format: uuid
@@ -2551,3 +3340,547 @@ components:
           description: |
             Absolute http(s) base URL with no path, query, or fragment;
             a trailing slash is stripped before storage.
+
+    SetupStatus:
+      type: object
+      description: First-run installer state (M4).
+      required: [completed, needs_token]
+      properties:
+        completed:
+          type: boolean
+          description: |
+            True once the installer has finished (or a headless admin was
+            created).
+        needs_token:
+          type: boolean
+          description: |
+            True while no admin exists yet — the state in which
+            `POST /setup/admin` must carry the signed installer token.
+            False once an admin exists (remaining steps use that session).
+
+    SetupAdminRequest:
+      type: object
+      required: [token, name, email, password]
+      properties:
+        token:
+          type: string
+          minLength: 1
+          description: |
+            The signed installer token printed to the server logs on first
+            boot.
+        name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 10
+          description: Initial admin password (minimum 10 characters).
+
+    SetupInstanceRequest:
+      type: object
+      required: [name, external_url]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Instance display name (branding).
+        external_url:
+          type: string
+          format: uri
+          minLength: 1
+          pattern: "^https?://"
+          description: |
+            Absolute http(s) base URL with no path, query, or fragment; a
+            trailing slash is stripped before storage.
+
+    InstanceSettings:
+      type: object
+      description: The instance display name and public URL settings.
+      required: [name, external_url]
+      properties:
+        name:
+          type: string
+          description: Instance display name ('' until configured).
+        external_url:
+          type: string
+          description: Public base URL, no trailing slash ('' until configured).
+
+    SetupCompleteResult:
+      type: object
+      description: Outcome of finishing first-run setup.
+      required: [completed, welcome_ticket_number]
+      properties:
+        completed:
+          type: boolean
+          description: Always true on success.
+        welcome_ticket_number:
+          type: ["string", "null"]
+          pattern: "^[0-9]{8}-[0-9]{4,}$"
+          description: |
+            Number of the seeded welcome ticket (YYYYMMDD-NNNN); null if
+            one already existed and none was seeded.
+
+    PortalTicket:
+      type: object
+      description: |
+        A customer's own ticket, portal projection. Deliberately omits
+        assignee and team — the portal never exposes staff routing.
+      required:
+        - id
+        - number
+        - subject
+        - status
+        - priority
+        - created_at
+        - updated_at
+        - closed_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          pattern: "^[0-9]{8}-[0-9]{4,}$"
+        subject:
+          type: string
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        priority:
+          $ref: "#/components/schemas/TicketPriority"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        closed_at:
+          type: ["string", "null"]
+          format: date-time
+
+    PortalArticle:
+      type: object
+      description: |
+        One **public** message in a portal ticket's thread. Internal notes
+        are never represented here. The author is reduced to `sender_type`
+        (customer / agent / system) so staff identities are not exposed.
+      required:
+        - id
+        - ticket_id
+        - sender_type
+        - body_text
+        - body_html
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        ticket_id:
+          type: string
+          format: uuid
+        sender_type:
+          $ref: "#/components/schemas/ArticleSenderType"
+        body_text:
+          type: string
+        body_html:
+          type: ["string", "null"]
+          description: Sanitized HTML body; null when the article is plain text.
+        created_at:
+          type: string
+          format: date-time
+
+    PortalTicketDetail:
+      description: A portal ticket with its public thread.
+      allOf:
+        - $ref: "#/components/schemas/PortalTicket"
+        - type: object
+          required: [articles]
+          properties:
+            articles:
+              type: array
+              description: Public articles only, oldest first.
+              items:
+                $ref: "#/components/schemas/PortalArticle"
+
+    PortalCreateTicketRequest:
+      type: object
+      required: [subject, body]
+      properties:
+        subject:
+          type: string
+          minLength: 1
+        body:
+          type: string
+          minLength: 1
+          description: Plain-text body of the ticket's first public article.
+
+    PortalReplyRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          description: Plain-text public reply body.
+
+    PublicTicketRequest:
+      type: object
+      required: [subject, body, email]
+      properties:
+        subject:
+          type: string
+          minLength: 1
+        body:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+          description: |
+            Submitter's email; the requester is created from or matched to
+            it.
+        name:
+          type: string
+          description: Submitter's display name (optional).
+        _honeypot:
+          type: string
+          description: |
+            Anti-spam honeypot. Hidden from real users and expected to be
+            empty; a non-empty value causes the submission to be silently
+            dropped (still 202, no ticket created).
+
+    PublicTicketAccepted:
+      type: object
+      description: |
+        Acknowledgement of a public submission. `ticket_number` is present
+        when a ticket was created and absent when an anti-spam control
+        silently dropped the submission.
+      properties:
+        ticket_number:
+          type: string
+          pattern: "^[0-9]{8}-[0-9]{4,}$"
+          description: The assigned ticket number (YYYYMMDD-NNNN).
+
+    ApiKeyScope:
+      type: string
+      description: |
+        API-key permission. `read` allows safe (GET) operations; `write`
+        additionally allows mutating operations.
+      enum: [read, write]
+
+    ApiKey:
+      type: object
+      description: |
+        Scoped machine API key metadata. The secret is never included —
+        only the display prefix and usage columns.
+      required:
+        - id
+        - name
+        - key_prefix
+        - scopes
+        - created_by
+        - last_used_at
+        - created_at
+        - revoked_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        key_prefix:
+          type: string
+          description: Non-secret display fragment (e.g. "sd_live_ab12cd").
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiKeyScope"
+        created_by:
+          type: string
+          format: uuid
+          description: |
+            The admin/agent who minted the key; requests act as this user.
+        last_used_at:
+          type: ["string", "null"]
+          format: date-time
+          description: |
+            Last successful authentication with this key; null if never
+            used.
+        created_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: ["string", "null"]
+          format: date-time
+          description: When the key was revoked; null while live.
+
+    CreateApiKeyRequest:
+      type: object
+      required: [name, scopes]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/ApiKeyScope"
+
+    ApiKeyCreated:
+      description: |
+        A newly minted key including its **one-time** plaintext. The `key`
+        is shown only in this response and can never be retrieved again.
+      allOf:
+        - $ref: "#/components/schemas/ApiKey"
+        - type: object
+          required: [key]
+          properties:
+            key:
+              type: string
+              description: |
+                Full plaintext key (`sd_live_…`). Returned once; store it
+                now. Only its SHA-256 digest is persisted.
+
+    WebhookEvent:
+      type: string
+      description: A subscribable outbound event type.
+      enum: [ticket.created, ticket.updated, article.created]
+
+    WebhookDeliveryStatus:
+      type: string
+      description: |
+        Delivery state: `pending` (enqueued or retrying), `success` (2xx
+        received), `failed` (retries exhausted).
+      enum: [pending, success, failed]
+
+    Webhook:
+      type: object
+      description: |
+        An outbound webhook endpoint. The signing secret is never included
+        in any response.
+      required: [id, name, url, events, active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookEvent"
+        active:
+          type: boolean
+          description: Inactive endpoints receive no deliveries.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateWebhookRequest:
+      type: object
+      required: [name, url, events]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        url:
+          type: string
+          format: uri
+          pattern: "^https?://"
+        events:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/WebhookEvent"
+        active:
+          type: boolean
+          default: true
+        secret:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: |
+            HMAC-SHA256 signing secret. Write-only: encrypted at rest and
+            never echoed. Omit to have a random secret generated; the
+            effective secret is returned once as `signing_secret`.
+
+    WebhookCreated:
+      description: |
+        A newly created webhook including its **one-time** signing secret.
+      allOf:
+        - $ref: "#/components/schemas/Webhook"
+        - type: object
+          required: [signing_secret]
+          properties:
+            signing_secret:
+              type: string
+              description: |
+                The effective HMAC-SHA256 signing secret (supplied or
+                generated). Returned once; configure it on the receiver to
+                verify the `X-SlateDesk-Signature` header. Never returned
+                again.
+
+    UpdateWebhookRequest:
+      type: object
+      description: Partial update; omitted fields are left unchanged.
+      properties:
+        name:
+          type: string
+          minLength: 1
+        url:
+          type: string
+          format: uri
+          pattern: "^https?://"
+        events:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/WebhookEvent"
+        active:
+          type: boolean
+        secret:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: |
+            Rotate the HMAC-SHA256 signing secret. Write-only and never
+            echoed — the caller supplies the new value (no generation on
+            update).
+
+    WebhookTestResult:
+      type: object
+      description: |
+        Outcome of a synchronous webhook test ping. `ok=false` still
+        arrives as HTTP 200 — the ping was attempted; this object is its
+        result.
+      required: [ok, response_code, detail, latency_ms]
+      properties:
+        ok:
+          type: boolean
+          description: True when the endpoint answered 2xx.
+        response_code:
+          type: ["integer", "null"]
+          description: |
+            HTTP status returned by the endpoint; null on transport error.
+        detail:
+          type: string
+          description: |
+            Human-readable outcome (the error on failure, a short summary
+            otherwise).
+        latency_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Wall-clock duration of the ping.
+
+    WebhookDelivery:
+      type: object
+      description: One row of the durable webhook delivery log.
+      required:
+        - id
+        - webhook_id
+        - event_type
+        - ticket_id
+        - payload
+        - status
+        - response_code
+        - attempts
+        - last_error
+        - created_at
+        - delivered_at
+      properties:
+        id:
+          type: integer
+          format: int64
+        webhook_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          description: The event type this delivery carries.
+        ticket_id:
+          type: ["string", "null"]
+          format: uuid
+          description: The ticket the event concerns; null when not ticket-scoped.
+        payload:
+          type: object
+          additionalProperties: true
+          description: The signed JSON payload delivered to the endpoint.
+        status:
+          $ref: "#/components/schemas/WebhookDeliveryStatus"
+        response_code:
+          type: ["integer", "null"]
+          description: Last HTTP status from the endpoint; null before any response.
+        attempts:
+          type: integer
+          minimum: 0
+          description: Number of delivery attempts so far.
+        last_error:
+          type: ["string", "null"]
+          description: Most recent delivery error; null on success.
+        created_at:
+          type: string
+          format: date-time
+        delivered_at:
+          type: ["string", "null"]
+          format: date-time
+          description: When a 2xx was received; null until delivered.
+
+    CannedReply:
+      type: object
+      description: |
+        A reusable agent reply snippet. `body` stores the raw template;
+        `{{ticket.number}}` / `{{requester.name}}` are substituted at
+        composer-insert time.
+      required: [id, title, body, created_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        body:
+          type: string
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateCannedReplyRequest:
+      type: object
+      required: [title, body]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        body:
+          type: string
+          minLength: 1
+
+    UpdateCannedReplyRequest:
+      type: object
+      description: Partial update; omitted fields are left unchanged.
+      properties:
+        title:
+          type: string
+          minLength: 1
+        body:
+          type: string
+          minLength: 1

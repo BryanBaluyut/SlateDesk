@@ -17,9 +17,9 @@ import { useShortcut, useShortcutListener } from "@/lib/shortcuts";
  */
 export const Route = createFileRoute("/_auth")({
   beforeLoad: async ({ context, location }) => {
+    let user;
     try {
-      const user = await context.queryClient.ensureQueryData(meQueryOptions);
-      return { user };
+      user = await context.queryClient.ensureQueryData(meQueryOptions);
     } catch (err) {
       if (isApiError(err) && err.status === 401) {
         throw redirect({
@@ -29,6 +29,11 @@ export const Route = createFileRoute("/_auth")({
       }
       throw err;
     }
+    // Customers never see the agent workspace — send them to the portal.
+    if (user.role === "customer") {
+      throw redirect({ to: "/portal" });
+    }
+    return { user };
   },
   component: AuthLayout,
 });

@@ -4,6 +4,10 @@
 .claude
 bin
 docs
+data
+.env
+*.log
+install.sh
 frontend/node_modules
 frontend/dist
 Dockerfile
